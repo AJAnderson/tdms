@@ -11,6 +11,8 @@ pub enum TocProperties {
     KTocNewObjList = 1 << 2,
 }
 
+/// The DataTypeRaw enum's values match the binary representation in
+/// tdms files.
 #[derive(FromPrimitive, Clone, Copy, Debug)]
 #[repr(u32)]
 pub enum DataTypeRaw {
@@ -38,14 +40,17 @@ pub enum DataTypeRaw {
     DAQmxRawData = 0xFFFF_FFFF,
 }
 
+/// Wrapper for a float with unit. QUESTION: Can the genericism of this type be
+/// limited to only real floats?
 #[derive(Debug)]
 pub struct FloatWithUnit<T> {
-    // This is a wrapper for a float with unit
     repr_type: T,
     unit: String,
 }
-#[derive(Debug)]
+
 /// A wrapper type for data types found in tdms files
+/// QUESTION: Is there a better way to allow for generic returns in "read_data" functions
+#[derive(Debug)]
 pub enum DataType {
     Void,          // Should nuke this somehow
     Boolean(bool), // nptdms uses 1 byte, I'm not sure this is correct as LV internal representation is 32 bits for a bool
@@ -62,11 +67,16 @@ pub enum DataType {
     //Extended(f128), Can't represent this currently
     FloatUnit(FloatWithUnit<f32>),
     DoubleUnit(FloatWithUnit<f64>),
-    //ExtendedUnit(FloatWithUnit<f128>), Can't represent this
+    //ExtendedUnit(FloatWithUnit<f128>), Can't represent this currently
     TdmsString(String),
+    // .... Incomplete implementations
 }
 
-/// A wrapper type for vectors of data types found in tdms files (I hate this)
+/// A wrapper type for vectors of data types found in tdms files
+/// Previously I was using Vec<DataType> but this resulted in every
+/// element coming with information about what datatype it was which
+/// was un-necessary and looked gross
+/// See TdmsFileHandle::read_data_vector for the point of implementation
 #[derive(Debug)]
 pub enum DataTypeVec {
     Void,               // Should nuke this somehow
@@ -87,6 +97,14 @@ pub enum DataTypeVec {
     //ExtendedUnit(Vec<FloatWithUnit<f128>>), Can't represent this
     TdmsString(Vec<String>),
 }
+
+// Notes: Strings are stored concatenated in the raw data block with an array of offsets for each
+// string's first character stored first in the raw data according to the Tdms Reference.
+// In practise (in the Example.tdms file in this repo), this does not appear to be the case.
+// For any given string channel, it's raw data index is the offset to the array which in turn
+// is meant to tell you where it's character is. In the Example.tdms file this is not the case
+// There is no preceding array of first character indices, strings are concatenated in object
+// order.
 
 impl fmt::Display for DataTypeVec {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

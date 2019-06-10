@@ -69,16 +69,19 @@ pub fn match_read_u64(file: &mut TdmsFileHandle) -> Result<u64, io::Error> {
 }
 
 /*
-The TDMS file structure consists of a top level file object which contains metadata regarding the file.
-Underneath that are any number of group objects, each of which can contain any number of channels.
+The TDMS file structure consists of a series of segments which contain metadata regarding the file.
+Each segment contains any number of group objects, each of which can contain any number of properties.
+Segment
+-Objects
+--Properties
 
-File
--Segment
---Objects
----Properties
-
-
+The object hierarchy is always(?) encoded as
+Root Object
+-Group Object
+--Channel Object
 */
+
+/// A wrapper used to provide something to hang the various file read operations on
 #[derive(Debug)]
 pub struct TdmsFileHandle {
     handle: io::BufReader<std::fs::File>,
@@ -86,7 +89,7 @@ pub struct TdmsFileHandle {
 }
 
 impl TdmsFileHandle {
-    /// Open a Tdms file and initialize a buf rdr to handle access.
+    /// Open a Tdms file and initialize a buf rdr to handle access. Default to little endian
     pub fn open(path: &path::Path) -> Result<TdmsFileHandle, io::Error> {
         let fh = fs::File::open(path)?;
         let rdr = io::BufReader::new(fh);
@@ -173,23 +176,31 @@ impl TdmsFileHandle {
         Ok(dataout)
     }
 
-    /// End goal is to only label the data type once, rather than for every point
+    /// Reads an array of the same type of data into a vector. It's designed to be used
+    /// after a complete map of the read operations has been compiled (hence "read_pairs" argument)
+    ///
+    /// QUESTION: Is there a better way to make a generic read operation than matching on
+    /// everything all the time? It feels extremely wasteful.
     pub fn read_data_vector(
         &mut self,
         read_pairs: Vec<ReadPair>,
         rawtype: DataTypeRaw,
     ) -> Result<DataTypeVec, io::Error> {
-        // Notes: read_pairs is suspect as it requires putting things in the right order
-
-        // Also: this only works for string initially as I really don't want to type out
-        // all that boiler plate but don't know how to make it generic
+        // This only works for string initially as I really don't want to type out
+        // all that boiler plate but don't know how to make it generic more easily
         let datavec: DataTypeVec = match rawtype {
             DataTypeRaw::TdmsString => {
                 let mut datavec: Vec<String> = Vec::new();
                 for pair in read_pairs {
                     self.handle.seek(SeekFrom::Start(pair.start_index))?;
-                    // This is so convoluted and shit, I already know what the data type is, why do I have
-                    // to match it again, don't know how to fix this and keep the simplicity of read_datatype
+                    // This is so convoluted, I already know what the data type is, why do I have
+                    // to match it again, don't know how to fix this and keep the simplicity of
+                    // read_datatype
+
+                    //NOTE: This also does not actually handle arrays of data i.e. when ReadPair.no_elements > 1
+                    // It could be trivially extended with a for loop, but repeated calls to bufrdr might
+                    // not be flash. QUESTION: Would it be better to modify read_datatype so it can take
+                    // an arguments for the number of reads to perform? In which case might it not become "read_data_vector"?
                     match self.read_datatype(rawtype)? {
                         DataType::TdmsString(string) => datavec.push(string),
                         _ => (),
@@ -197,7 +208,7 @@ impl TdmsFileHandle {
                 }
                 DataTypeVec::TdmsString(datavec)
             }
-            _ => DataTypeVec::Void, // This fucking sucks
+            _ => DataTypeVec::Void, // Stump implementation until I can get some feedback on generics
         };
 
         Ok(datavec)
@@ -225,8 +236,9 @@ impl TdmsFile {
         })
     }
 
-    /// Walk the file attempting to load the segment meta data. Raw data is loaded by channel. This arrangment
-    /// enables lazy loading of large files.
+    /// Walk the file attempting to load the segment meta data and objects.
+    /// Raw data is not loaded during these reads in the interest of Lazy Loading
+    /// i.e. graceful handling of very large files.
     pub fn map_segments(&mut self) -> Result<&mut Self, TdmsError> {
         // TODO: The construction of this function isn't right, if segment address ever is
         // 0xFFFF_FFFF then the file is malformed and this should probably be some kind of error.
@@ -245,7 +257,7 @@ impl TdmsFile {
                         }
                         _ => return Err(TdmsError::Io(err)), // Any other io error, repackage it and send it on
                     },
-                    _ => return Err(err), // Return on weird custom errors as well
+                    _ => return Err(err), // Return early on weird custom errors as well
                 },
             };
 
@@ -260,20 +272,11 @@ impl TdmsFile {
         Ok(self)
     }
 
-    // Notes: Strings are stored concatenated in the raw data block with an array of offsets for each string's first character stored
-    // first in the raw data (does this hold with mixed channels?)
-    // For any given string channel, it's raw data index is the offset to the array which tells you where it's character is. They all
-    // have the property of an array index which tells you how far to read into that array
-
     // Result<Vec<u64>, TdmsError>
     pub fn load_data(&mut self, path: &str) -> Result<DataTypeVec, TdmsError> {
-        // Algo:
-        // Drill into segments (only one necessary) to see if requested channel is in the object list
-        // Find the data type of the channel
-        // Find how many values are to be read and size (object.no_vals) (object.total_size)
-        // Find
-        let mut raw_data_type: DataTypeRaw = DataTypeRaw::Void; // I hate having this default
-                                                                // TODO if the default above is required, have to guard against it.
+        // I hate having this default
+        // TODO if the default above is required, have to guard against it.
+        let mut raw_data_type: DataTypeRaw = DataTypeRaw::Void;
 
         let mut offset: u64 = 0;
         let mut chunk_size: u64 = 0;
@@ -282,6 +285,9 @@ impl TdmsFile {
 
         let mut data: DataTypeVec = DataTypeVec::Void;
 
+        // Dive into the segments and then into the meta data
+        // Attempt to index out the requested object and gather
+        // information required to read its raw data.
         for segment in &self.segments {
             segment.meta_data.as_ref().map(|meta_data| {
                 meta_data
@@ -437,8 +443,8 @@ pub struct TdmsMetaData {
     no_objects: u32,
     objects: BTreeMap<String, TdmsObject>,
     chunk_size: u64,
-    // This is a helper map to figure out where in any given chunk to read out
-    // that channels value
+    // This is a helper map to figure out how deep into any given raw data chunk to start reading
+    // the values for the object of interest
     prev_obj_sizes: BTreeMap<String, u64>,
 }
 
@@ -460,8 +466,9 @@ impl fmt::Display for TdmsMetaData {
 }
 
 impl TdmsMetaData {
+    /// Creates a new meta data struct and reads objects into it.
     pub fn new(file: &mut TdmsFile) -> Result<TdmsMetaData, TdmsError> {
-        Ok(TdmsMetaData::_new(&mut file.handle)?.read_meta_data(file)?)
+        Ok(TdmsMetaData::_new(&mut file.handle)?._read_meta_data(file)?)
     }
 
     fn _new(file: &mut TdmsFileHandle) -> Result<TdmsMetaData, TdmsError> {
@@ -474,7 +481,9 @@ impl TdmsMetaData {
         })
     }
 
-    fn read_meta_data(mut self, file: &mut TdmsFile) -> Result<TdmsMetaData, TdmsError> {
+    /// Read in objects, keep track of chunk size so objects can be loaded later by
+    /// directly addressing their constituents
+    fn _read_meta_data(mut self, file: &mut TdmsFile) -> Result<TdmsMetaData, TdmsError> {
         let mut chunk_size: u64 = 0;
         for _i in 0..self.no_objects {
             let obj = TdmsObject::read_object(file)?;
@@ -528,7 +537,7 @@ impl fmt::Display for TdmsObject {
         Ok(())
     }
 }
-//Daqmx properties need to be filled in
+
 #[derive(Debug)]
 pub struct ObjectProperty {
     prop_name_len: u32,
@@ -550,7 +559,8 @@ impl fmt::Display for ObjectProperty {
 impl TdmsObject {
     /// Read an object from file including its properties
     /// Currently a bit twisted as it requires the full file structure to look back at
-    /// previous information, maybe this should be a two stage initialisation?
+    /// previous information. QUESTION: Is there a better division of responsibility which
+    /// avoids this problem
     pub fn read_object(file: &mut TdmsFile) -> Result<TdmsObject, TdmsError> {
         let path_len = match_read_u32(&mut file.handle)?;
         // println!("DBG: Path len:  {}", path_len);
@@ -559,7 +569,6 @@ impl TdmsObject {
         // let current_loc = file.handle.seek(SeekFrom::Current(0))?;
         // println!("Current Loc: {:x}", current_loc);
 
-        //TODO: Fuck this is awkward, everything is a bit twisted up
         file.handle.handle.read_exact(&mut path)?;
         // TODO: The below error handling sucks, should convert TdmsError so it wraps string parse errors as well
         let path =
@@ -584,7 +593,7 @@ impl TdmsObject {
         } else if raw_data_index == 0 {
             // raw data for this object is identical to previous segments, copy the raw data across
             // I'm using map_or here to perform a kind of unwrap with fail back, the None case should never
-            // be triggered. TODO possibly make it an explicit failure, not function to use map_or_err?
+            // be triggered. QUESTION: possibly make it an explicit failure, not function to use map_or_err?
             let previous_object = file
                 .segments
                 .last()
@@ -611,6 +620,7 @@ impl TdmsObject {
         // println!("DBG: no_vals:  {:?}", no_raw_vals);
         // println!("DBG: total_size:  {:?}", total_size);
 
+        // Read the object properties
         let no_properties = match_read_u32(&mut file.handle)?;
         let properties: Option<Vec<ObjectProperty>>;
         if no_properties > 0 {
@@ -623,7 +633,7 @@ impl TdmsObject {
             properties = None;
         }
 
-        let object = TdmsObject {
+        Ok(TdmsObject {
             object_path_len: path_len,
             object_path: path,
             raw_data_index,
@@ -633,39 +643,38 @@ impl TdmsObject {
             total_size,
             no_properties,
             properties,
-        };
-
-        // println!("Object: {}", object);
-        Ok(object)
+        })
     }
 }
 
 impl ObjectProperty {
+    /// Read properties associated with an object
     pub fn read_property(file: &mut TdmsFileHandle) -> Result<ObjectProperty, io::Error> {
         let prop_name_len = match_read_u32(file)?;
 
         let mut prop_name = vec![0u8; prop_name_len as usize];
         file.handle.read_exact(&mut prop_name)?;
+        // Again, should convert TdmsError to wrap string parse errors
         let prop_name = String::from_utf8(prop_name).expect("Unable to convert buffer to string");
-        // TODO: There's some kind of compose and strip thing we could do here
+        // QUESTION: I struggled to make this a one liner, something in the background kept
+        // wrapping Option around the result, regardless of whehter I called unwrap
+        // QUESTION: Is there a better way to map raw values to enum than the approach I have taken?
         let prop_datatype = num::FromPrimitive::from_u32(match_read_u32(file)?);
         let prop_datatype = prop_datatype.unwrap();
 
         let property = file.read_datatype(prop_datatype)?;
 
-        let property = ObjectProperty {
+        Ok(ObjectProperty {
             prop_name_len,
             prop_name,
             data_type: prop_datatype,
             property,
-        };
-
-        // println!("__Property__\n{}", property);
-        Ok(property)
+        })
     }
 }
 
 fn main() -> Result<(), TdmsError> {
+    // call with cargo run Example.tdms to run the example
     let args: Vec<String> = env::args().collect();
 
     println!("{:?}", args);
@@ -690,7 +699,7 @@ fn main() -> Result<(), TdmsError> {
     }
 
     let data = tdms_file.load_data("/'Untitled'/'Time Stamp'")?;
-    // println!("{}", data);
+    println!("{}", data);
 
     Ok(())
 }
