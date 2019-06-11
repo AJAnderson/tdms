@@ -32,24 +32,6 @@ pub struct ReadPair {
     no_elements: u64,
 }
 
-/// Helper function for reading u32 value given file endianess. Useful enough to be promoted to first order
-pub fn match_read_u32(file: &mut TdmsFileHandle) -> Result<u32, io::Error> {
-    let value = match file.endianess {
-        Endianess::BigEndian => file.handle.read_u32::<BigEndian>()?,
-        Endianess::LittleEndian => file.handle.read_u32::<LittleEndian>()?,
-    };
-    Ok(value)
-}
-
-/// Helper function for reading u64 value given file endianess. Useful enough to be promoted to first order
-pub fn match_read_u64(file: &mut TdmsFileHandle) -> Result<u64, io::Error> {
-    let value = match file.endianess {
-        Endianess::BigEndian => file.handle.read_u64::<BigEndian>()?,
-        Endianess::LittleEndian => file.handle.read_u64::<LittleEndian>()?,
-    };
-    Ok(value)
-}
-
 /*
 The TDMS file structure consists of a series of segments which contain metadata regarding the file.
 Each segment contains any number of group objects, each of which can contain any number of properties.
@@ -81,18 +63,38 @@ impl TdmsFileHandle {
         })
     }
 
+    /// Helper function for reading u32 value given file endianess.
+    pub fn match_read_u32(&mut self) -> Result<u32, io::Error> {
+        let value = match self.endianess {
+            Endianess::BigEndian => self.handle.read_u32::<BigEndian>()?,
+            Endianess::LittleEndian => self.handle.read_u32::<LittleEndian>()?,
+        };
+        Ok(value)
+    }
+
+    /// Helper function for reading u64 value given file endianess.
+    pub fn match_read_u64(&mut self) -> Result<u64, io::Error> {
+        let value = match self.endianess {
+            Endianess::BigEndian => self.handle.read_u64::<BigEndian>()?,
+            Endianess::LittleEndian => self.handle.read_u64::<LittleEndian>()?,
+        };
+        Ok(value)
+    }
+
+    pub fn match_read_string(&mut self) -> Result<String, TdmsError> {
+        let str_len = self.match_read_u32()?;
+        // println!("DBG: Str Len {}", str_len);
+        let mut str_raw_buf = vec![0u8; str_len as usize];
+        self.handle.read_exact(&mut str_raw_buf)?;
+        Ok(String::from_utf8(str_raw_buf)?)
+    }
+
     /// Reads data into the DataType enum based on the value of DataTypeRaw.
     /// The distinction exists because an enum can't have both a defined reprsentation
     /// and a wrapped value
     pub fn read_datatype(&mut self, rawtype: DataTypeRaw) -> Result<DataType, TdmsError> {
         let dataout = match rawtype {
-            DataTypeRaw::TdmsString => {
-                let str_len = match_read_u32(self)?;
-                // println!("DBG: Str Len {}", str_len);
-                let mut str_raw_buf = vec![0u8; str_len as usize];
-                self.handle.read_exact(&mut str_raw_buf)?;
-                DataType::TdmsString(String::from_utf8(str_raw_buf)?)
-            }
+            DataTypeRaw::TdmsString => DataType::TdmsString(self.match_read_string()?),
             DataTypeRaw::U8 => {
                 let value = self.handle.read_u8()?;
                 DataType::U8(value)
@@ -105,11 +107,11 @@ impl TdmsFileHandle {
                 DataType::U16(value)
             }
             DataTypeRaw::U32 => {
-                let value = match_read_u32(self)?;
+                let value = self.match_read_u32()?;
                 DataType::U32(value)
             }
             DataTypeRaw::U64 => {
-                let value = match_read_u64(self)?;
+                let value = self.match_read_u64()?;
                 DataType::U64(value)
             }
             DataTypeRaw::I8 => {
@@ -374,9 +376,9 @@ impl TdmsSegment {
         }
 
         // Finish out the lead in based on whether the data is little endian
-        let version_no = match_read_u32(&mut file.handle)?;
-        let next_seg_offset = match_read_u64(&mut file.handle)?;
-        let raw_data_offset = match_read_u64(&mut file.handle)?;
+        let version_no = file.handle.match_read_u32()?;
+        let next_seg_offset = file.handle.match_read_u64()?;
+        let raw_data_offset = file.handle.match_read_u64()?;
 
         let current_loc = file.handle.handle.seek(SeekFrom::Current(0))?; // position at end of lead in read
 
@@ -451,8 +453,8 @@ impl TdmsMetaData {
         Ok(TdmsMetaData::_new(&mut file.handle)?._read_meta_data(file)?)
     }
 
-    fn _new(file: &mut TdmsFileHandle) -> Result<TdmsMetaData, TdmsError> {
-        let no_objects = match_read_u32(file)?;
+    fn _new(file_handle: &mut TdmsFileHandle) -> Result<TdmsMetaData, TdmsError> {
+        let no_objects = file_handle.match_read_u32()?;
         Ok(TdmsMetaData {
             no_objects,
             objects: BTreeMap::new(),
@@ -483,7 +485,6 @@ impl TdmsMetaData {
 
 #[derive(Debug)]
 pub struct TdmsObject {
-    object_path_len: u32,
     object_path: String,
     raw_data_index: u32,
     raw_data_type: Option<DataTypeRaw>, // present depending on raw_data_index val
@@ -520,7 +521,6 @@ impl fmt::Display for TdmsObject {
 
 #[derive(Debug)]
 pub struct ObjectProperty {
-    prop_name_len: u32,
     prop_name: String,
     data_type: DataTypeRaw,
     property: DataType,
@@ -542,22 +542,11 @@ impl TdmsObject {
     /// previous information. QUESTION: Is there a better division of responsibility which
     /// avoids this problem
     pub fn read_object(file: &mut TdmsFile) -> Result<TdmsObject, TdmsError> {
-        let path_len = match_read_u32(&mut file.handle)?;
-        // println!("DBG: Path len:  {}", path_len);
-
-        let mut path = vec![0u8; path_len as usize];
-        // let current_loc = file.handle.seek(SeekFrom::Current(0))?;
-        // println!("Current Loc: {:x}", current_loc);
-
-        file.handle.handle.read_exact(&mut path)?;
-        // TODO: The below error handling sucks, should convert TdmsError so it wraps string parse errors as well
-        let path =
-            String::from_utf8(path).or(Err("Unable to convert buffer to string".to_string()))?;
-        // println!("DBG: Path:  {:?}", path);
+        let path = file.handle.match_read_string()?;
 
         file.object_paths.insert(path.clone(), 0);
 
-        let mut raw_data_index = match_read_u32(&mut file.handle)?;
+        let mut raw_data_index = file.handle.match_read_u32()?;
         // println!("DBG: data_index:  {:?}", raw_data_index);
         let raw_data_type;
         let raw_data_dim;
@@ -590,10 +579,10 @@ impl TdmsObject {
             total_size = previous_object.total_size;
             raw_data_index = previous_object.raw_data_index;
         } else {
-            raw_data_type = num::FromPrimitive::from_u32(match_read_u32(&mut file.handle)?);
-            raw_data_dim = Some(match_read_u32(&mut file.handle)?);
-            no_raw_vals = Some(match_read_u64(&mut file.handle)?);
-            total_size = Some(match_read_u64(&mut file.handle)?);
+            raw_data_type = num::FromPrimitive::from_u32(file.handle.match_read_u32()?);
+            raw_data_dim = Some(file.handle.match_read_u32()?);
+            no_raw_vals = Some(file.handle.match_read_u64()?);
+            total_size = Some(file.handle.match_read_u64()?);
         };
         // println!("DBG: data_type:  {:?}", raw_data_type);
         // println!("DBG: data_dim:  {:?}", raw_data_dim);
@@ -601,7 +590,7 @@ impl TdmsObject {
         // println!("DBG: total_size:  {:?}", total_size);
 
         // Read the object properties
-        let no_properties = match_read_u32(&mut file.handle)?;
+        let no_properties = file.handle.match_read_u32()?;
         let properties: Option<Vec<ObjectProperty>>;
         if no_properties > 0 {
             let mut temp_vec = Vec::new();
@@ -614,7 +603,6 @@ impl TdmsObject {
         }
 
         Ok(TdmsObject {
-            object_path_len: path_len,
             object_path: path,
             raw_data_index,
             raw_data_type,
@@ -630,22 +618,17 @@ impl TdmsObject {
 impl ObjectProperty {
     /// Read properties associated with an object
     pub fn read_property(file: &mut TdmsFileHandle) -> Result<ObjectProperty, TdmsError> {
-        let prop_name_len = match_read_u32(file)?;
+        let prop_name = file.match_read_string()?;
 
-        let mut prop_name = vec![0u8; prop_name_len as usize];
-        file.handle.read_exact(&mut prop_name)?;
-        // Again, should convert TdmsError to wrap string parse errors
-        let prop_name = String::from_utf8(prop_name)?;
         // QUESTION: I struggled to make this a one liner, something in the background kept
         // wrapping Option around the result, regardless of whehter I called unwrap
         // QUESTION: Is there a better way to map raw values to enum than the approach I have taken?
-        let prop_datatype = num::FromPrimitive::from_u32(match_read_u32(file)?);
+        let prop_datatype = num::FromPrimitive::from_u32(file.match_read_u32()?);
         let prop_datatype = prop_datatype.unwrap();
 
         let property = file.read_datatype(prop_datatype)?;
 
         Ok(ObjectProperty {
-            prop_name_len,
             prop_name,
             data_type: prop_datatype,
             property,
