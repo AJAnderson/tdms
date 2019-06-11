@@ -5,32 +5,14 @@ use std::fs;
 use std::io;
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path;
+use std::string;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use num;
 mod tdms_datatypes;
 use tdms_datatypes::{DataType, DataTypeRaw, DataTypeVec, TocProperties};
-
-/// Custom error type to handle multiple types of errors
-/// Needs: Variant for parse errors
-#[derive(Debug)]
-pub enum TdmsError {
-    Io(io::Error),
-    Custom(String),
-}
-
-// QUESTION: How to I convert this to &str? Do I want to?
-impl From<String> for TdmsError {
-    fn from(msg: String) -> TdmsError {
-        TdmsError::Custom(msg)
-    }
-}
-
-impl From<std::io::Error> for TdmsError {
-    fn from(err: std::io::Error) -> TdmsError {
-        TdmsError::Io(err)
-    }
-}
+mod tdms_error;
+use tdms_error::TdmsError;
 
 #[derive(Debug)]
 pub enum Endianess {
@@ -102,16 +84,14 @@ impl TdmsFileHandle {
     /// Reads data into the DataType enum based on the value of DataTypeRaw.
     /// The distinction exists because an enum can't have both a defined reprsentation
     /// and a wrapped value
-    pub fn read_datatype(&mut self, rawtype: DataTypeRaw) -> Result<DataType, io::Error> {
+    pub fn read_datatype(&mut self, rawtype: DataTypeRaw) -> Result<DataType, TdmsError> {
         let dataout = match rawtype {
             DataTypeRaw::TdmsString => {
                 let str_len = match_read_u32(self)?;
                 // println!("DBG: Str Len {}", str_len);
                 let mut str_raw_buf = vec![0u8; str_len as usize];
                 self.handle.read_exact(&mut str_raw_buf)?;
-                DataType::TdmsString(
-                    String::from_utf8(str_raw_buf).expect("Could not convert from string"),
-                )
+                DataType::TdmsString(String::from_utf8(str_raw_buf)?)
             }
             DataTypeRaw::U8 => {
                 let value = self.handle.read_u8()?;
@@ -185,7 +165,7 @@ impl TdmsFileHandle {
         &mut self,
         read_pairs: Vec<ReadPair>,
         rawtype: DataTypeRaw,
-    ) -> Result<DataTypeVec, io::Error> {
+    ) -> Result<DataTypeVec, TdmsError> {
         // This only works for string initially as I really don't want to type out
         // all that boiler plate but don't know how to make it generic more easily
         let datavec: DataTypeVec = match rawtype {
@@ -649,13 +629,13 @@ impl TdmsObject {
 
 impl ObjectProperty {
     /// Read properties associated with an object
-    pub fn read_property(file: &mut TdmsFileHandle) -> Result<ObjectProperty, io::Error> {
+    pub fn read_property(file: &mut TdmsFileHandle) -> Result<ObjectProperty, TdmsError> {
         let prop_name_len = match_read_u32(file)?;
 
         let mut prop_name = vec![0u8; prop_name_len as usize];
         file.handle.read_exact(&mut prop_name)?;
         // Again, should convert TdmsError to wrap string parse errors
-        let prop_name = String::from_utf8(prop_name).expect("Unable to convert buffer to string");
+        let prop_name = String::from_utf8(prop_name)?;
         // QUESTION: I struggled to make this a one liner, something in the background kept
         // wrapping Option around the result, regardless of whehter I called unwrap
         // QUESTION: Is there a better way to map raw values to enum than the approach I have taken?
