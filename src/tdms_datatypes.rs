@@ -52,7 +52,7 @@ pub struct FloatWithUnit<T> {
 /// QUESTION: Is there a better way to allow for generic returns in "read_data" functions
 #[derive(Debug)]
 pub enum DataType {
-    Void,          // Should nuke this somehow
+    Void(()),      // Should nuke this somehow
     Boolean(bool), // nptdms uses 1 byte, I'm not sure this is correct as LV internal representation is 32 bits for a bool
     I8(i8),
     I16(i16),
@@ -79,7 +79,7 @@ pub enum DataType {
 /// See TdmsFileHandle::read_data_vector for the point of implementation
 #[derive(Debug)]
 pub enum DataTypeVec {
-    Void,               // Should nuke this somehow
+    Void(Vec<()>),      // Should nuke this somehow
     Boolean(Vec<bool>), // nptdms uses 1 byte, I'm not sure this is correct as LV internal representation is 32 bits for a bool
     I8(Vec<i8>),
     I16(Vec<i16>),

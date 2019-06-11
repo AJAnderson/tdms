@@ -171,7 +171,7 @@ impl TdmsFileHandle {
                 };
                 DataType::Double(value)
             }
-            _ => DataType::Void, // TODO this is a dirty placeholder for compilation purposes
+            _ => DataType::Void(()), // TODO this is a dirty placeholder for compilation purposes
         };
         Ok(dataout)
     }
@@ -208,7 +208,7 @@ impl TdmsFileHandle {
                 }
                 DataTypeVec::TdmsString(datavec)
             }
-            _ => DataTypeVec::Void, // Stump implementation until I can get some feedback on generics
+            _ => DataTypeVec::Void(Vec::new()), // Stump implementation until I can get some feedback on generics
         };
 
         Ok(datavec)
@@ -283,7 +283,7 @@ impl TdmsFile {
         let mut size: u64 = 0;
         let mut no_vals: u64 = 0;
 
-        let mut data: DataTypeVec = DataTypeVec::Void;
+        let mut data: DataTypeVec = DataTypeVec::Void(Vec::new());
 
         // Dive into the segments and then into the meta data
         // Attempt to index out the requested object and gather
