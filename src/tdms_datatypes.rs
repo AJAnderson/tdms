@@ -68,8 +68,8 @@ pub enum DataType {
     FloatUnit(FloatWithUnit<f32>),
     DoubleUnit(FloatWithUnit<f64>),
     //ExtendedUnit(FloatWithUnit<f128>), Can't represent this currently
-    TdmsString(String),
-    // .... Incomplete implementations
+    TdmsString(String), // Carries a length in front
+                        // .... Incomplete implementations
 }
 
 /// A wrapper type for vectors of data types found in tdms files
