@@ -2,3 +2,4 @@
 **/*.rs.bk
 /TdmsDummyTestFiles
 /Example.tdms_index
+log_files
