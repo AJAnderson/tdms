@@ -5,17 +5,18 @@ use std::fs;
 use std::io;
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path;
-use std::string;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use flexi_logger::{opt_format, Logger};
+use log::{debug, warn};
 use num;
 mod tdms_datatypes;
 use tdms_datatypes::{DataType, DataTypeRaw, DataTypeVec, TocProperties};
 mod tdms_error;
-use tdms_error::TdmsError;
+use tdms_error::{TdmsError, TdmsErrorKind};
 
 #[derive(Debug)]
-pub enum Endianess {
+pub enum Endianness {
     BigEndian,
     LittleEndian,
 }
@@ -47,36 +48,36 @@ Root Object
 
 /// A wrapper used to provide something to hang the various file read operations on
 #[derive(Debug)]
-pub struct TdmsFileHandle {
+pub struct FileHandle {
     handle: io::BufReader<std::fs::File>,
-    endianess: Endianess,
+    endianness: Endianness,
 }
 
-impl TdmsFileHandle {
+impl FileHandle {
     /// Open a Tdms file and initialize a buf rdr to handle access. Default to little endian
-    pub fn open(path: &path::Path) -> Result<TdmsFileHandle, io::Error> {
+    pub fn open(path: &path::Path) -> Result<FileHandle, io::Error> {
         let fh = fs::File::open(path)?;
         let rdr = io::BufReader::new(fh);
-        Ok(TdmsFileHandle {
+        Ok(FileHandle {
             handle: rdr,
-            endianess: Endianess::LittleEndian,
+            endianness: Endianness::LittleEndian,
         })
     }
 
-    /// Helper function for reading u32 value given file endianess.
+    /// Helper function for reading u32 value given file endianness.
     pub fn match_read_u32(&mut self) -> Result<u32, io::Error> {
-        let value = match self.endianess {
-            Endianess::BigEndian => self.handle.read_u32::<BigEndian>()?,
-            Endianess::LittleEndian => self.handle.read_u32::<LittleEndian>()?,
+        let value = match self.endianness {
+            Endianness::BigEndian => self.handle.read_u32::<BigEndian>()?,
+            Endianness::LittleEndian => self.handle.read_u32::<LittleEndian>()?,
         };
         Ok(value)
     }
 
-    /// Helper function for reading u64 value given file endianess.
+    /// Helper function for reading u64 value given file endianness.
     pub fn match_read_u64(&mut self) -> Result<u64, io::Error> {
-        let value = match self.endianess {
-            Endianess::BigEndian => self.handle.read_u64::<BigEndian>()?,
-            Endianess::LittleEndian => self.handle.read_u64::<LittleEndian>()?,
+        let value = match self.endianness {
+            Endianness::BigEndian => self.handle.read_u64::<BigEndian>()?,
+            Endianness::LittleEndian => self.handle.read_u64::<LittleEndian>()?,
         };
         Ok(value)
     }
@@ -95,63 +96,61 @@ impl TdmsFileHandle {
     pub fn read_datatype(&mut self, rawtype: DataTypeRaw) -> Result<DataType, TdmsError> {
         let dataout = match rawtype {
             DataTypeRaw::TdmsString => DataType::TdmsString(self.match_read_string()?),
-            DataTypeRaw::U8 => {
-                let value = self.handle.read_u8()?;
-                DataType::U8(value)
-            }
+            DataTypeRaw::U8 => DataType::U8(self.handle.read_u8()?),
             DataTypeRaw::U16 => {
-                let value = match self.endianess {
-                    Endianess::BigEndian => self.handle.read_u16::<BigEndian>()?,
-                    Endianess::LittleEndian => self.handle.read_u16::<LittleEndian>()?,
+                let value = match self.endianness {
+                    Endianness::BigEndian => self.handle.read_u16::<BigEndian>()?,
+                    Endianness::LittleEndian => self.handle.read_u16::<LittleEndian>()?,
                 };
                 DataType::U16(value)
             }
-            DataTypeRaw::U32 => {
-                let value = self.match_read_u32()?;
-                DataType::U32(value)
-            }
-            DataTypeRaw::U64 => {
-                let value = self.match_read_u64()?;
-                DataType::U64(value)
-            }
-            DataTypeRaw::I8 => {
-                let value = self.handle.read_i8()?;
-                DataType::I8(value)
-            }
+            DataTypeRaw::U32 => DataType::U32(self.match_read_u32()?),
+            DataTypeRaw::U64 => DataType::U64(self.match_read_u64()?),
+            DataTypeRaw::I8 => DataType::I8(self.handle.read_i8()?),
             DataTypeRaw::I16 => {
-                let value = match self.endianess {
-                    Endianess::BigEndian => self.handle.read_i16::<BigEndian>()?,
-                    Endianess::LittleEndian => self.handle.read_i16::<LittleEndian>()?,
+                let value = match self.endianness {
+                    Endianness::BigEndian => self.handle.read_i16::<BigEndian>()?,
+                    Endianness::LittleEndian => self.handle.read_i16::<LittleEndian>()?,
                 };
                 DataType::I16(value)
             }
             DataTypeRaw::I32 => {
-                let value = match self.endianess {
-                    Endianess::BigEndian => self.handle.read_i32::<BigEndian>()?,
-                    Endianess::LittleEndian => self.handle.read_i32::<LittleEndian>()?,
+                let value = match self.endianness {
+                    Endianness::BigEndian => self.handle.read_i32::<BigEndian>()?,
+                    Endianness::LittleEndian => self.handle.read_i32::<LittleEndian>()?,
                 };
                 DataType::I32(value)
             }
             DataTypeRaw::I64 => {
-                let value = match self.endianess {
-                    Endianess::BigEndian => self.handle.read_i64::<BigEndian>()?,
-                    Endianess::LittleEndian => self.handle.read_i64::<LittleEndian>()?,
+                let value = match self.endianness {
+                    Endianness::BigEndian => self.handle.read_i64::<BigEndian>()?,
+                    Endianness::LittleEndian => self.handle.read_i64::<LittleEndian>()?,
                 };
                 DataType::I64(value)
             }
             DataTypeRaw::SingleFloat => {
-                let value = match self.endianess {
-                    Endianess::BigEndian => self.handle.read_f32::<BigEndian>()?,
-                    Endianess::LittleEndian => self.handle.read_f32::<LittleEndian>()?,
+                let value = match self.endianness {
+                    Endianness::BigEndian => self.handle.read_f32::<BigEndian>()?,
+                    Endianness::LittleEndian => self.handle.read_f32::<LittleEndian>()?,
                 };
                 DataType::Float(value)
             }
             DataTypeRaw::DoubleFloat => {
-                let value = match self.endianess {
-                    Endianess::BigEndian => self.handle.read_f64::<BigEndian>()?,
-                    Endianess::LittleEndian => self.handle.read_f64::<LittleEndian>()?,
+                let value = match self.endianness {
+                    Endianness::BigEndian => self.handle.read_f64::<BigEndian>()?,
+                    Endianness::LittleEndian => self.handle.read_f64::<LittleEndian>()?,
                 };
                 DataType::Double(value)
+            }
+            DataTypeRaw::Boolean => {
+                let value = self.handle.read_u8()?;
+                let boolval: bool;
+                if value == 0 {
+                    boolval = false;
+                } else {
+                    boolval = true;
+                }
+                DataType::Boolean(boolval)
             }
             _ => DataType::Void(()), // TODO this is a dirty placeholder for compilation purposes
         };
@@ -159,15 +158,16 @@ impl TdmsFileHandle {
     }
 
     /// Reads an array of the same type of data into a vector. It's designed to be used
-    /// after a complete map of the read operations has been compiled (hence "read_pairs" argument)
+    /// after a complete map of the read operations has been compiled via the map_segments function
+    /// 
+    /// IMPORTANT NOTE: Due to the default buffer size of BufRdr (8kb) it might not be more efficient to
+    /// try and lazy load channels in the long run, as repeated seek operations at the file system level
+    ///  must be performed if data is spaced more than 8kb's apart.
     ///
     /// QUESTION: Is there a better way to make a generic read operation than matching on
     /// everything all the time? It feels extremely wasteful.
-    pub fn read_data_vector(
-        &mut self,
-        read_pairs: Vec<ReadPair>,
-        rawtype: DataTypeRaw,
-    ) -> Result<DataTypeVec, TdmsError> {
+    #[rustfmt::skip]
+    pub fn read_data_vector(&mut self, read_pairs: Vec<ReadPair>, rawtype: DataTypeRaw) -> Result<DataTypeVec, TdmsError> {
         // This only works for string initially as I really don't want to type out
         // all that boiler plate but don't know how to make it generic more easily
         let datavec: DataTypeVec = match rawtype {
@@ -201,7 +201,7 @@ impl TdmsFileHandle {
 /// Maintains additional meta data about the file extracted from the table of contents (ToC) mask.
 #[derive(Debug)]
 pub struct TdmsFile {
-    handle: TdmsFileHandle,
+    handle: FileHandle,
     segments: Vec<TdmsSegment>,
     interleaved: Interleaved,
     object_paths: BTreeMap<String, u8>, //u8 value is meaningless
@@ -211,7 +211,7 @@ impl TdmsFile {
     /// Open a Tdms file and initialize a buf rdr to handle access.
     pub fn new_file(path: &path::Path) -> Result<TdmsFile, io::Error> {
         Ok(TdmsFile {
-            handle: TdmsFileHandle::open(path)?,
+            handle: FileHandle::open(path)?,
             segments: Vec::new(),
             interleaved: Interleaved::Regular,
             object_paths: BTreeMap::new(),
@@ -231,13 +231,14 @@ impl TdmsFile {
             // if it's a different kind of error.
             let segment = match TdmsSegment::new(self, segment_address) {
                 Ok(segment) => segment,
-                Err(err) => match err {
-                    TdmsError::Io(err) => match err.kind() {
+                Err(err) => match &err.repr {
+                    TdmsErrorKind::Io(e) => match e.kind() {
                         ErrorKind::UnexpectedEof => {
                             println!("Completed read");
                             return Ok(self);
                         }
-                        _ => return Err(TdmsError::Io(err)), // Any other io error, repackage it and send it on
+                        // Any other io error, repackage it and send it on
+                        _ => return Err(err),
                     },
                     _ => return Err(err), // Return early on weird custom errors as well
                 },
@@ -318,13 +319,17 @@ impl TdmsFile {
     }
 
     /// Return a vector of channel paths
-    pub fn objects(&self) -> Vec<&String> {
-        let mut objects: Vec<&String> = Vec::new();
+    pub fn objects(&self) -> Vec<&str> {
+        let mut objects: Vec<&str> = Vec::new();
 
         for key in self.object_paths.keys() {
             objects.push(key)
         }
         objects
+    }
+
+    pub fn current_loc(&mut self) {
+        println!("{:?}", self.handle.handle.seek(SeekFrom::Current(0)));
     }
 }
 
@@ -365,31 +370,37 @@ impl TdmsSegment {
         // Seek to the "absolute index" (relative to start) This index has to be built up for each segment as we go. This is handled in the
         // map_segments function
         let target_loc = file.handle.handle.seek(SeekFrom::Start(index))?;
-        println!("Target Loc: {:x}", target_loc);
+        println!("Target Loc: {}", target_loc);
 
         // Convert the critical lead in information to appropriate representation
-        let file_tag: u32 = file.handle.handle.read_u32::<BigEndian>()?;
+        let file_tag: u32 = file.handle.handle.read_u32::<LittleEndian>()?;
         let toc_mask: u32 = file.handle.handle.read_u32::<LittleEndian>()?;
 
+        println!("File tag: {}", file_tag);
+        println!("toc_mask: {:b}", toc_mask);
+
         if toc_mask & TocProperties::KTocBigEndian as u32 == TocProperties::KTocBigEndian as u32 {
-            file.handle.endianess = Endianess::BigEndian;
+            file.handle.endianness = Endianness::BigEndian;
         }
+
+        println!("Endianess {:?}", file.handle.endianness);
 
         // Finish out the lead in based on whether the data is little endian
         let version_no = file.handle.match_read_u32()?;
         let next_seg_offset = file.handle.match_read_u64()?;
         let raw_data_offset = file.handle.match_read_u64()?;
+        println!("version_no: {}", version_no);
+        println!("next_seg_offset: {}", next_seg_offset);
+        println!("raw_data_offset: {}", raw_data_offset);
 
         let current_loc = file.handle.handle.seek(SeekFrom::Current(0))?; // position at end of lead in read
+        println!("current_loc: {}", current_loc);
 
         // Load the meta_data for this segment TODO 2) does there need to be a check of kToCNewContents?
         let meta_data = TdmsMetaData::new(file)?;
         let no_chunks = (next_seg_offset - raw_data_offset) / meta_data.chunk_size;
         let meta_data = Some(meta_data);
 
-        // Load the raw data, this part should move out to a different function
-        // let mut raw_data = vec![0u8; (next_seg_offset - raw_data_offset) as usize];
-        // file.handle.read_exact(&mut raw_data)?;
         let raw_data = None;
 
         // Initialise the Segment
@@ -453,8 +464,9 @@ impl TdmsMetaData {
         Ok(TdmsMetaData::_new(&mut file.handle)?._read_meta_data(file)?)
     }
 
-    fn _new(file_handle: &mut TdmsFileHandle) -> Result<TdmsMetaData, TdmsError> {
+    fn _new(file_handle: &mut FileHandle) -> Result<TdmsMetaData, TdmsError> {
         let no_objects = file_handle.match_read_u32()?;
+        debug!("no_objects {}", no_objects);
         Ok(TdmsMetaData {
             no_objects,
             objects: BTreeMap::new(),
@@ -463,8 +475,8 @@ impl TdmsMetaData {
         })
     }
 
-    /// Read in objects, keep track of chunk size so objects can be loaded later by
-    /// directly addressing their constituents
+    /// Read in objects, keep track of accumlating chunk size so objects can be loaded later by
+    /// directly addressing their constituent addresses
     fn _read_meta_data(mut self, file: &mut TdmsFile) -> Result<TdmsMetaData, TdmsError> {
         let mut chunk_size: u64 = 0;
         for _i in 0..self.no_objects {
@@ -543,11 +555,12 @@ impl TdmsObject {
     /// avoids this problem
     pub fn read_object(file: &mut TdmsFile) -> Result<TdmsObject, TdmsError> {
         let path = file.handle.match_read_string()?;
+        debug!("obj_path {}", path);
 
         file.object_paths.insert(path.clone(), 0);
 
         let mut raw_data_index = file.handle.match_read_u32()?;
-        // println!("DBG: data_index:  {:?}", raw_data_index);
+        debug!("data_index:  {:?}", raw_data_index);
         let raw_data_type;
         let raw_data_dim;
         let no_raw_vals;
@@ -584,10 +597,10 @@ impl TdmsObject {
             no_raw_vals = Some(file.handle.match_read_u64()?);
             total_size = Some(file.handle.match_read_u64()?);
         };
-        // println!("DBG: data_type:  {:?}", raw_data_type);
-        // println!("DBG: data_dim:  {:?}", raw_data_dim);
-        // println!("DBG: no_vals:  {:?}", no_raw_vals);
-        // println!("DBG: total_size:  {:?}", total_size);
+        debug!("data_type:  {:?}", raw_data_type);
+        debug!("data_dim:  {:?}", raw_data_dim);
+        debug!("no_vals:  {:?}", no_raw_vals);
+        debug!("total_size:  {:?}", total_size);
 
         // Read the object properties
         let no_properties = file.handle.match_read_u32()?;
@@ -617,16 +630,18 @@ impl TdmsObject {
 
 impl ObjectProperty {
     /// Read properties associated with an object
-    pub fn read_property(file: &mut TdmsFileHandle) -> Result<ObjectProperty, TdmsError> {
+    pub fn read_property(file: &mut FileHandle) -> Result<ObjectProperty, TdmsError> {
         let prop_name = file.match_read_string()?;
+        debug!("prop_name {}", prop_name);
 
         // QUESTION: I struggled to make this a one liner, something in the background kept
         // wrapping Option around the result, regardless of whehter I called unwrap
         // QUESTION: Is there a better way to map raw values to enum than the approach I have taken?
         let prop_datatype = num::FromPrimitive::from_u32(file.match_read_u32()?);
         let prop_datatype = prop_datatype.unwrap();
-
+        debug!("prop_datatype {:?}", prop_datatype);
         let property = file.read_datatype(prop_datatype)?;
+        debug!("property {:?}", property);
 
         Ok(ObjectProperty {
             prop_name,
@@ -637,6 +652,14 @@ impl ObjectProperty {
 }
 
 fn main() -> Result<(), TdmsError> {
+    // Initialize a logger for logging debug messages, useful during prototyping
+    Logger::with_env_or_str("rstdms=debug, lib=debug")
+        .log_to_file()
+        .directory("log_files")
+        .format(opt_format)
+        .start()
+        .unwrap();
+
     // call with cargo run Example.tdms to run the example
     let args: Vec<String> = env::args().collect();
 
@@ -654,7 +677,13 @@ fn main() -> Result<(), TdmsError> {
     println!();
     let mut tdms_file = TdmsFile::new_file(&pathbuf)?;
 
-    tdms_file.map_segments()?;
+    match tdms_file.map_segments() {
+        Ok(_) => (),
+        Err(e) => {
+            tdms_file.current_loc();
+            return Err(e);
+        }
+    }
 
     let channels = tdms_file.objects();
     for channel in channels {
@@ -662,7 +691,9 @@ fn main() -> Result<(), TdmsError> {
     }
 
     let data = tdms_file.load_data("/'Untitled'/'Time Stamp'")?;
-    println!("{}", data);
+    // let data = tdms_file.load_data("Baratron ChamberPressure >1500Pa")?;
+
+    println!("{:?}", data);
 
     Ok(())
 }
