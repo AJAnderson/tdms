@@ -69,7 +69,10 @@ pub enum DataType {
     DoubleUnit(FloatWithUnit<f64>),
     //ExtendedUnit(FloatWithUnit<f128>), Can't represent this currently
     TdmsString(String), // Carries a length in front
-                        // .... Incomplete implementations
+                        // DaqMx(??)
+                        // ComplexSingle(??)
+                        // CompledDouble(??)
+                        // TimeStamp(??)
 }
 
 /// A wrapper type for vectors of data types found in tdms files
@@ -96,6 +99,10 @@ pub enum DataTypeVec {
     DoubleUnit(Vec<FloatWithUnit<f64>>),
     //ExtendedUnit(Vec<FloatWithUnit<f128>>), Can't represent this
     TdmsString(Vec<String>),
+    // DaqMx(Vec<??>)
+    // ComplexSingle(Vec<??>)
+    // CompledDouble(Vec<??>)
+    // TimeStamp(Vec<??>)
 }
 
 // Notes: Strings are stored concatenated in the raw data block with an array of offsets for each
@@ -105,17 +112,3 @@ pub enum DataTypeVec {
 // is meant to tell you where it's character is. In the Example.tdms file this is not the case
 // There is no preceding array of first character indices, strings are concatenated in object
 // order.
-
-impl fmt::Display for DataTypeVec {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            DataTypeVec::TdmsString(string_vec) => {
-                for string in string_vec {
-                    writeln!(f, "{}", string)?;
-                }
-            }
-            _ => println!("Print not implemented for this type because I'm still sketching"),
-        }
-        Ok(())
-    }
-}
