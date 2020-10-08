@@ -1,0 +1,124 @@
+30/11/19
+
+Currently working on trying to get more types of files reading in correctly. 
+
+Stuck on my little endian test file and its highlighted the need to implement some proper error handling messages.
+
+The first error message I need to implement is when the requested channel name doesn't exist.
+
+Actually, before I do that it appears I can't parse TestFile_LE.tdms correctly at all.
+It's incorrectly parsing the total size of the data nominally in the segment.
+Checked it in hxd, and my parser is correctly reading the 8 bytes (u64) value in the file.
+The file doesn't make sense and I wonder if it's malformed? Except that the excel plugin appears to be able to parse the file just fine.
+
+Figured it! The spec states that the total size value is only stored for variable length data types. Of the tdms data types I think only strings are variable length types.
+
+The various optional parts of the properties are wrapped in options during initialisation and initialised depending ont eh value of the raw data index. I'm not sure this is the most graceful way, will have a quick play with an alternative structure.
+
+Ok, next error, after reading the meta data the chunk size field has been set to zero. This causes a later part of the program to fall down as it tries to divide by chunk size. So either it's mistakenly computed zero or I need to handle zero sized chunks.
+
+1/12/19
+
+chunk_size is meant to be a helper to do something but I can't remember exactly what (bad commenting.) It appears to be an accumulating track of object size, except that I had mistakenly linked it directly to total_size, which is actually just to do with string values. I think I need to make a choice on how to compute chunk size depending on data type.
+
+Using Adam's nptdms as reference confirms my idea, need to calculate chunk size as no_values * data_type_size * dim. I don't have any information encoding datatype size at the moment.
+
+I think I don't want to carry that information around with the datatype so the best place to do it is in the object read in method.
+
+I created a size function as an implementation on DataTypeRaw. It returns an error if called with DataTypeRaw::TdmsString as string has no defined size. A guard clause is required in the calling function as a file read is required to determine string size. This size function is intended solely for use in computing total chunk size. It would be great if it could be a const function.
+
+Attempting to run and it got a lot further, choked trying to unwrap an option that was None, not sure where that came from. There are 3 possible call sites.
+Fixed the first call site I looked at which was reading in a datatype for a property. I implemented the same kind of error as when reading an object datatype in.
+
+2nd call site looks like it might be the nuts. It's unwrapping a path which I believe is the one I've provided to try and tell it to load a channel. This will fail hard if channel is wrong. That being said I commented out trying to load a specific channel so perhaps it's not this but it will need to be fixed.
+
+3rd call site is where I attempt to copy across from a previous object if raw_data_index == 0. This is another stinker. It's actually quite a complex look back with a number of possible ways to fail. I'm having trouble thinking of all the right methods on option/result to use to keep the chain going.
+
+There could be no previous segment, then the previous segment could have no meta data, then that meta data could fail to contain an object addresable by the current objects path (in other words could fail to contain a prior instance of the object)
+
+Have tried a couple of variants, one looks like it will compile but is ugly, one looks nice but I'm struggling with the lifetimes. Nap time.
+
+2/12/2019
+
+I fixed the object read code so it returns more meaningful errors which confirmed that somehow I'm getting NoPreviousObject error with a raw_index == 0. So I'm thinking maybe the path has a problem. The paths in the log look like:
+/'Group2'/'I32WavRamp'
+The slash characters should be part of the string? Perhaps that's getting messed up somehow.
+
+Also, I'm beginning to think maybe the objects map should be promoted to a first order representation of the data rather than buried in the meta data struct which is a more file structure oriented represenation rather than data oriented.
+
+So it's definitely the case that this part of the file is packaged as a raw_data_index == 0 section, so the problem is that we can't find the object in the look up.
+
+Actually, I think it's legitimately the case that the previous segment doesn't have that channel in it. I don't see that the segments can be out of order so that implies it's possible for the relationship to look back further than the immediately prior segment.
+
+So if it can go back further then I could either promote objects to something like a simple list, but then I have to know how many segments I'm in and where those segments are in memory. This would speed up reads to the objects after they've been mapped, as opposed to what I'm currently doing which is re-walking the entire segment list looking for the object.
+
+Already kind of have this stored at the file level, just need to mod it store a vector of segment indexes rather than a meaningless number.
+
+3/12/19
+
+Ok, getting back into the load_data function as it's currently squatting on some of the functionality that should probably be in map_segments.
+
+Currently we iterate over segments and dive into the meta_data to check if the object is in there. If it is there, then extract all the information about it.
+
+While within that segment construct a set of read pairs by iterating over the no_chunks in that segment. Mental block here.
+
+I've massively misunderstood the concept of raw_data_index, it's nothing to do with where raw data lives. It's the length of the index information. It's always either 20 or 28 depending on whether it's "defined" data or "variable length" i.e. Strings.
+
+Raw data arrays for all channels are concatenated in the exact order in which the channels appear in the metadata for the segment.
+
+I'm still confused by whether there can be more than one chunk ("multiple channels") per segment, I think there can be in which case it's a repeating pattern of reads to get at a single channel, iterate over chunks jump straight to index within chunk based on knowing previous accumulated channel sizes (effectively index of channel raw data within chunk)
+
+5/12/2019
+
+Heavily modified the way the read segment, meta data and object code works to simplify storage of mapping information required for late reads. At least I hope it's simplified. The goal is once the object list bubbles back up to the segment level we take that opportunity to build a map for that object in that segment. The map consists of a vector of structs which encapsulate an absolute index and a number of bytes to read (though - this may have to be no_values not no_bytes given the use of read_u32).
+
+On an object by object basis if there's raw data we build this map then check if that object is in the global object map. If it is we add the extra map to any existing mapping. If it's not then we insert it.
+
+Then loading data becomes as simple as checking if the object is in the map then iterating over the read pairs and building a single contiguous vector.
+
+7/12/2019:
+
+Given that we're trying to look back to the last instance of the object we have to store the actual last instance of the object observed.
+
+Shit, read completed.
+
+I implemented storage for the last instance of an object any time the file level object map is hit.
+
+The file was very slow, I wasn't sure if it's because I'm cloning the objects outright or whether it's because I'm printing so much crap to console and log files. It generated a 13 MB log file. Disabling logging at the debug level massively sped up the run.
+
+Ok, I'm not getting any data out of the data load operation. Putting in an obviously bad channel name correctly returns an error that the channel isn't found. Obviously that's because I haven't implemented vector reads for all datatypes.
+
+12/12/2019
+Updates spotty sorry, have been trying to debug what was going on. I implemented a read type for double and tested it. Had garbage data that ended up being because I was confusing # bytes with # of values. In any case, it now works for contiguous double data. But during debugging I remembered I have to implement interleaved support as well if I want to load other data channels from my test file.
+
+To build a read map for interleaved data you have to know how many objects are in the segment. It would be super inefficient to seek and load alternating values I think so we'd potentially want to block load all the raw data in the segment. Perhaps Bufrdr just handles this though?
+
+The dumbest way I could extend my existing abstraction of read pairs would be to set up a pair for every interleaved data point, I'm just gonna try it and see how stupid it is
+
+4/10/2020
+
+Long time since I picked up the project. I'm pausing the interleaved data read in the hopes of getting an "easy win". I want to implement some plotting code using one of the plotting libraries to display the read in data in a more rewarding form.
+
+Initial attempt with the "charts" library.
+
+Woohoo, got it to work with my dummy file which clearly shows why I needed to get interleaved working. You see a saw tooth of values from 0 to 1 (the dataset is a simple ramp of doubles going from 0 to 1)
+
+Tried to get a signal express test file to load and hit the chunk_size = 0 problem (div by zero)
+
+7/10/20
+
+Ok, starting again with the signal express file logs to try and ID why I got chunk size 0.
+
+Working my way back up through some of the decisions I made previously, I've gotten rid of maintaining the interleaved flag in the TdmsFile struct as the spec strictly states that it can be varied segment to segment.
+
+For similar logic I should probably not maintain the endianess flag next to the file handle, but I'm not sure how to configure the read methods gracefully if I don't.
+
+Have hoisted the endianess as an input variable to the read operations, it ends up looking a lot nicer. It means the caller functions in the read segment use their local endianess information to say how they want to read.
+
+I've also commented out the datavector read because it's a bit of a shit fest at the moment and the endianess handling change breaks it in fairly fundamental ways.
+
+Have implemented the builder pattern (I think?) for TdmsSegment, same as TdmsMetadata in the interest of separating out some of the "massive functionness" of it, bits of segment initialisation are more self contained now, i.e. read lead in.
+
+8/10/2020
+
+Ok, got it to recompile after I got the function signatures tidied up, had to change the read helpers to use a reference to endianness, rather than trying to take ownership of it. Back to the divide by zero error
