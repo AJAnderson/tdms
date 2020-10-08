@@ -1,14 +1,15 @@
 [package]
-name = "rstdms"
-version = "0.1.0"
 authors = ["Alex Anderson <anderson.alexj@gmail.com>"]
 edition = "2018"
+name = "rstdms"
+version = "0.1.0"
 
 [dependencies]
-byteorder = "1.3.1"
-num = "0.2.0"
-num-traits = "0.2"
-num-derive = "0.2"
 bitflags = "*"
-log = "0.4"
+byteorder = "1.3.1"
+charts = "0.3.0"
 flexi_logger = "^0.13.2"
+log = "0.4"
+num = "0.2.0"
+num-derive = "0.2"
+num-traits = "0.2"
