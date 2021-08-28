@@ -121,4 +121,160 @@ Have implemented the builder pattern (I think?) for TdmsSegment, same as TdmsMet
 
 8/10/2020
 
-Ok, got it to recompile after I got the function signatures tidied up, had to change the read helpers to use a reference to endianness, rather than trying to take ownership of it. Back to the divide by zero error
+Ok, got it to recompile after I got the function signatures tidied up, had to change the read helpers to use a reference to endianness, rather than trying to take ownership of it. Back to the divide by zero error.
+
+Implemented builder pattern for Property but need to do so for object.
+
+Have implemented a guard clause that checks if chunk size is non-zero before trying to compute with it. If chunk_size is zero, then there's no raw data for the object in the segment. Have to think throug whether this follows more directly from just checking the ToCMask
+
+The guard clause got the signal express file to load but the layout looks like a total abuse of the spec, stuff is scattered all over segments. Also some of these segments ToCMask says they contain raw data but they don't appear to atually have any.
+
+I think this might be key from the spec:
+"Writing a new object to the next segment will imply that the segment contains all objects from the previous segment, plus the new objects described here. If the new segment does not contain any channel(s) from the previous segment, or if the order of channels in segment changes, the new segment needs to contain a new list of all objects. Refer to the Optimization section of this article for more information."
+
+10/10/2020
+Diving into the signal express loading approach. The key here is that unless you get a full object list then any new objects are assumed to be new, and I guess concatenated at the end?
+
+So how do you know when you receive an object list that it's a full new one or not? Maybe it's if you get a list of objects but the new objects tab is false?
+
+Also another thing to figure, objects can keep accumulating properties, reviewing if I've captured that objects are really first class things that you need to keep a track of and grow?
+
+Not really, objects are currently contained within metadata, that's kind of the right way to think of it, each segment has "MetaData" but then each object also has meta-data. I think I can "promote" the TdmsMetaData struct into being part of the segment
+
+There may be a subtle bug here, currently if an object has the same raw data indices, I copy it to a new object and push that object into the object map, but this likely results in duplicate reads, as I think what it actually means is "I haven't written any new raw data so all previous indices are valid"
+
+I need to refactor the read object method to update an object in the object map, rather than blindly read and treat it as if it's a totally new object.
+
+Have pushed down the object map stuff to the read object method but haven't refactored yet
+
+11/10/2020
+Struggled to get anywhere
+
+12/10/2020
+If we can get an existing object from the hashmap, then clone it, if not initialize it.
+
+Added a place to handle the DAQmx data but no handling yet.
+
+It actually doesn't work to compute read pairs at the read object level, you need meta data from the segment like its current data offset. What I've done instead is as per first sentence, clone the object then push new properties to it. It's a little inefficient but it then returns that object, then the segment parser goes over the objects and will update the object map with the latest copy. It's double handling but hopefully low cost (if there were a lot of properties it could be inefficient). Slightly more efficient would be to update in place and set a flag then update the read pair information and clear the flag.
+
+Ok, it's pulling and printing properties, not all that excel picks up but I think they're weirdly split across objects with similar names.
+
+It appears to be a weird way signal express does thing, some of the properties are stored against the group but then excel they're plotted as if they're by channel. Decimation levels are groups (why they fuck is this a file encoded thing?)
+
+11/11/2020
+
+Attempt to pick back up.
+
+I thought it might help me resolve some of my questions about what format to return data in to actually have a customer, i.e. the interface with python I originally envisioned.
+
+Ok, directly implementing against the numpy spec looks enormously complicated.
+
+26/05/2021
+
+Dusting back off, I've forgotten where I got to with Signal Express weirdness, so I'm just going to attack a standard labview and brute force the loading
+
+27/05/2021
+
+I've just noticed that byteorder implements write_f32_into function which can handle multiple points at the same time, though the dest is a mutable reference to an array, so might be a bit more awkward. And you have to read the full amount into the buffer otherwise you hit an error.
+
+Abandoning that after some discussion on forums. Will just use the preallocated vec approach.
+
+Also from forums someone agreed that it's technically possible for endianess to change segment to segment so I should handle it for robustness sake. I wonder if nptdms does?
+
+Refreshing my memory of the file spec, particularly the optimization section:
+1) - Writing a new object to the next segment will imply that the segment contains all objects from the previous segment, plus the new objects described here. If the new segment does not contain any channel(s) from the previous segment, or if the order of channels in segment changes, the new segment needs to contain a new list of all objects. Refer to the Optimization section of this article for more information.
+2) - Writing a new property to an object that already exists in the previous segment will add this property to the object.
+3) - Writing a property that already exists on an object will overwrite the previous value of that property.
+
+QUESTION/TODO:
+1) Am I handling over-writing properties correctly?
+2) Am I handling adding properties correctly?
+3) What flag is set to let you know you have a new object list, rather than the implied "the objects are still present"
+---"You must set the ToC bit kTocNewObjList" when a channel drops out.
+
+
+DONE:
+Why do I have a FileHandle struct, just for the ability to implement against it? Is that worth having to write "handle.handle" when I want to do low level read without check?
+- Not going to bother tinkering with this just yet
+
+TODO:
+I don't understand under what circumstances kToCMetaData would be false as the optimisation section of the spec implies that if there are no object changes, then the raw data simply gets appended and the lead in updated.
+
+DONE:
+I'm starting to think the object map ancillary structure is the right way to go given the segment centric view has all sorts of things going on like implicit object presence unless kTocNewObjList bit flag is set.
+Do I need a properties map? I think maybe not as all properties are implicitly encapsulated within objects.
+
+TODO:
+If I accept that endianess can change between segments, and that an object can straddle segments, then the ReadPair struct should probably carry endianess with it. Is there 1 ReadPair per segment?
+-> No, depends on # of chunks in the segment, I guess if multiple writes have occurred without updating object info?
+-> So there needs to be a struct that wraps the Vec<ReadPair> with endianess for that segment
+
+TODO:
+Related to the above, I need to take a step back and think about where the raw information should flow to. I don't need to hang on to every bit flag for example, I only need it transiently while I figure out the changes in objects, properties and raw data.
+
+28/05/2021
+Working on a visual representation of some of the optimisation stuff that was confusing me
+
+30/5/21
+Object order is important! Particularly with implicit object presence
+
+Conceptual, what if we read a new section, ToCNewObject not set so must implciitly have previous objects, but we read a property from an object mid way through the list.
+
+Update or add property to that object, then track through all other objects in order, so must store
+order somehow. Possibly replace relative position? Objects are currently a vec in the "file centric" data structure, so implicitly ordered there, but then I put it into a hashmap. In npTDMS adam constructs that look up dict on every segment read from the list of ordered objects and keys it by the objects path.
+
+So store in order by default, but update a hashmap on each read, man that's basically what I've got!
+
+25/8/2021
+
+Here we go again on the pick up :(.
+
+Trying to get refamiliar with the read_metadata function which is where the above is happening
+
+Ok, thoughts as I look at continuing the implementation of the object search and update code:
+1) I do bunch of work pulling object_maps from all_objects (destructively via remove), then update those object_maps, then insert them into a new map, then extend the new map with the remainder of the old map.
+
+-> The above is wrong ordering, I need to do the read_pair computation on the new map before extending it, then use that to reset live_objects map, then finally extend it and use it to reset the all_objects map.
+
+Ok, end of session I think I've handled the case where a new object list is flagged and everything needs to be updated, next is the "else" case where it's not a new object list and we have to use live_objects map + the new objects to work out all the data in the segment.
+
+26/8/2021
+
+Continuing as above.
+
+Notes:
+1) I'm still not convinced that I actually need live_objects. It depends on whether the prior segment reliably contains all objects. As I think about this though, there is an obvious scenario where you have multiple segments each with one additional new object. As I only store new objects in the vectors maintained in the segment data structs you wouldn't realise you're trackin an accumulating list. So live_objects definitely necessary.
+2) I don't like the cloning I'm having to do, actually, I just realised I don't need to, the only reason I was cloning and pushing the last_objects into a vec was to then iterate over them accumulating size so I can do the read pair calculations, but I can actually just do this as I go again.
+3) Can an object that is implicitly being tracked change size? Yes, a channel anywhere in the stack can change it's size, which will result in the new raw data index being recorded in the metadata for the segment under that channel name, but otherwise no change. So we actually have to check whether any new things are old things in our live_object and update as necessary.
+4) I'm trying to figure out how to update the read_maps efficiently, I'm not sure it's possible so just going to double iterate, once over the new objects, then over  the live_objects (with new index info) to append new read_map points. The problem is the lack of info about the chunk_size. As far as I can see, I can't obtain the chunk size without walking the updated live_objects list and I can't compute all the read pairs without the chunk_size
+
+End of session: I finished implementing the update live_objects arm. I've also tidied up the _read function to remove the prior way of doing things.
+
+Things to do:
+1) Handle all the compilation errors - DONE
+2) Still only handling non-interleaved data
+
+27/8/2021
+Have just finished dealing with some compilation errors related to ownership. I was trying to iterate over values in the all_objects map to push them into the new_map. I fixed it by draining the old all_objects map, but I think I could just extend the old map with the new one? Because I removed each object to modify it, the two maps are gauranteed to be mutually exclusive.
+
+Yes-> that builds without issue.
+
+28/8/2021
+
+Tidying up some of the warnings. Next steps are to advance a gui implementation (to give a customer for the library) and to implement more data vectors.
+
+Have the template UI running from within my main. Next step, put a plot widget in there.
+
+A lot of the code will have to move across to app.rs, main.rs in the egui thing is a simple launcher for the main gui thread.
+
+Side note:
+1) Need to move away from requiring people to manualyl call map_segments prior to calling any other function. Basically it should probably map on load. - DONE
+
+Implemented map on load, made map_segments private
+
+29/8/2021
+[11:22 PM] konsumlamm: why exactly don't you just make a generic type for this (possibly with some trait constraint)?
+struct DataTypeVec<T>(Vec<T>);
+
+
+
