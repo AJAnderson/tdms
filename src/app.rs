@@ -1,3 +1,4 @@
+use eframe::egui::ScrollArea;
 use eframe::{egui, epi};
 use egui::plot::{Line, Plot, Value, Values};
 use rfd::FileDialog;
@@ -11,6 +12,8 @@ pub struct TemplateApp {
     file_handle: Option<TdmsFile>,
     value: f32,
     channel_strings: Vec<String>,
+    selected_channel: Option<String>,
+    cached_data: Option<Values>,
 }
 
 impl Default for TemplateApp {
@@ -22,9 +25,13 @@ impl Default for TemplateApp {
             file_handle: None,
             value: 2.7,
             channel_strings: Vec::new(),
+            selected_channel: None,
+            cached_data: None,
         }
     }
 }
+
+// Helper functions for loading channels, calls out to rstdms lib functions
 impl TemplateApp {
     fn open_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new().pick_file() {
@@ -84,20 +91,55 @@ impl epi::App for TemplateApp {
                 if ui.button("Load File").clicked() {
                     self.open_dialog()
                 }
-                if self.channel_strings.len() > 0 {
-                    for (i, channel) in self.channel_strings.iter().enumerate() {
-                        ui.add(egui::SelectableLabel::new(
-                            false,
-                            channel.clone().replace("\n", " "),
-                        ));
-                    }
-                }
+                let mut scroll_area = ScrollArea::auto_sized();
+
+                let (current_scroll, max_scroll) = scroll_area.show(ui, |ui| {
+                    if self.channel_strings.len() > 0 {
+                        for (i, channel) in self.channel_strings.iter().enumerate() {
+                            if ui
+                                .add(egui::SelectableLabel::new(
+                                    false,
+                                    channel.clone().replace("\n", " "), // here we strip new lines for display purposes.
+                                ))
+                                .clicked()
+                            {
+                                // copy in channel path (Todo: This could just be a reference to the vector index)
+                                self.selected_channel = Some(channel.clone());
+                            }
+                        }
+                    };
+                    let margin = ui.visuals().clip_rect_margin;
+
+                    let current_scroll = ui.clip_rect().top() - ui.min_rect().top() + margin;
+                    let max_scroll =
+                        ui.min_rect().height() - ui.clip_rect().height() + 2.0 * margin;
+                    (current_scroll, max_scroll)
+                });
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
 
             ui.heading("Main plot");
+
+            // If we have a chan_path then load it if we haven't already
+            if let Some(chan_path) = self.selected_channel.clone() {
+                match self.file_handle.as_mut().unwrap().load_data(&chan_path) {
+                    Ok(data) => match &data {
+                        DataTypeVec::Double(datavector) => {
+                            let vecy = (0..datavector.len()).map(|i| {
+                                let x = i as f64;
+                                Value::new(x, datavector[i])
+                            });
+
+                            let line = Line::new(Values::from_values_iter(vecy));
+                            ui.add(egui::plot::Plot::new("Channel").line(line).view_aspect(1.0));
+                        }
+                        _ => unimplemented!(),
+                    },
+                    _ => unimplemented!(),
+                }
+            };
 
             // Display something
             // let sin = (0..1000).map(|i| {

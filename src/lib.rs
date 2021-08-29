@@ -212,8 +212,7 @@ impl FileHandle {
             DataTypeRaw::DoubleFloat => {                
                 let mut datavec: Vec<f64> = Vec::with_capacity((total_bytes / 8) as usize);
                 
-                for pair in read_pairs {
-                    println!("start_index: {} \t len(bytes): {}", pair.start_index, pair.no_bytes);
+                for pair in read_pairs {                    
                     self.handle.seek(SeekFrom::Start(pair.start_index))?;
                     for _i in 0..(pair.no_bytes / 8) {                        
                         datavec.push(self.handle.read_f64::<LE>()?);

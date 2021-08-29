@@ -276,5 +276,25 @@ Implemented map on load, made map_segments private
 [11:22 PM] konsumlamm: why exactly don't you just make a generic type for this (possibly with some trait constraint)?
 struct DataTypeVec<T>(Vec<T>);
 
+Got a double vector type plotted int the front end (test file: TestFile_LE.tdms) but I noticed it was hideously slow to load all the objects for display. Not sure if that's because it's printing or logging a bunch of stuff?
+
+Dumbly attempting a release build to see what happens
+-> noticeably faster but still slow.
+
+Also, need a scroll in that side panel (DONE)
+
+Tried loading the big file in release mode, it is horrifically slow, took minutes to parse through
+to the objects list. It did right a 600 MB log file though, so what if I turn that off or at least limit it to error. Yeah, that did it, down to seconds to parse the file (probably about 5-6ish?). The graph is sluggish though, not sure if it's because it's doing the load every time but that's most likely.
+
+It takes >20 s to open in excel then you're prompted to load due to a value limitation, so not bad.
+
+Will try caching the data, an interesting problem because how do I make a generic cache?
+
+I guess just cache the DataTypeVec enum for starters (I'm at risk of just spinning my wheels optimizing a toy app here.) Actually, why not just cache the line? Can't cache the Line because it's not copy and the ui.add method takes ownership of it.
+
+All I could eliminate was the load so it's only slightly faster. Tried to cache Values but that doesn't implement clone either.
+
+Removed caching, the creator of egui said painting dense lines is slow and they should be downsampled prior to painting to make them easier to handle. That's a future problem.
+
 
 
