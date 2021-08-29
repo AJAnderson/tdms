@@ -5,4 +5,6 @@
 5) Make the "new object is appended to existing objects in segment" case within read_metadata more efficient
 6) Handle DaqMX datattypes
 7) Bring error handling up to modern standard and thread into app
-8) Get plotting of data to work for visual debugging!
+DONE 8) Get plotting of data to work for visual debugging!
+9) The load_data function requiring a mutable file ref feels wrong.
+10) cache loaded data.
