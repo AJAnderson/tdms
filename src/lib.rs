@@ -189,6 +189,8 @@ impl FileHandle {
         let endianness = &object_map.endianness;
         
         // TODO boilerplate here
+        
+
         let datavec: DataTypeVec = match rawtype {
             DataTypeRaw::TdmsString => {
                 let mut datavec: Vec<String> = Vec::new();
@@ -215,10 +217,10 @@ impl FileHandle {
                 for pair in read_pairs {                    
                     self.handle.seek(SeekFrom::Start(pair.start_index))?;
                     for _i in 0..(pair.no_bytes / 8) {                        
-                        datavec.push(self.handle.read_f64::<LE>()?);
+                        datavec.push(self.handle.read_f64_into::<LE>(datavec)?);
                     }                    
                 }
-                DataTypeVec::Double(datavec) 
+                DataTypeVec::Double(datavec)
             }
             _ => DataTypeVec::Void(Vec::new()), // Stump implementation until I can get some feedback on generics
         };
