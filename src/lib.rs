@@ -7,7 +7,6 @@ use std::path;
 
 use byteorder::{BE, LE, ReadBytesExt};
 use log::debug;
-use num;
 pub mod tdms_datatypes;
 pub use tdms_datatypes::{DataType, DataTypeRaw, DataTypeVec, TocProperties};
 pub mod tdms_error;
@@ -211,21 +210,22 @@ impl FileHandle {
                 }
                 DataTypeVec::TdmsString(datavec)
             }
-            DataTypeRaw::DoubleFloat => {                
-                let mut datavec: Vec<f64> = Vec::with_capacity((total_bytes / 8) as usize);
-                
-                let mut tracker: usize = 0;
-                
-                for pair in read_pairs {                    
+            DataTypeRaw::DoubleFloat => {  
+                let mut datavec: Vec<f64> = vec![0.0; (total_bytes/8) as usize];
+
+                let mut tracker: usize = 0; // dummy variable to track bytes for indexing               
+                for pair in read_pairs { 
+                 
                     self.handle.seek(SeekFrom::Start(pair.start_index))?;
-                    self.handle.read_f64_into::<LE>(&mut datavec[tracker..tracker+pair.no_bytes as usize/8])?;
-                    tracker = tracker + pair.no_bytes as usize;                                      
+
+                    let no_values = pair.no_bytes as usize / 8 ;
+                    self.handle.read_f64_into::<LE>(&mut datavec[tracker..tracker+no_values])?;
+                    tracker += no_values;                                      
                 }
                 DataTypeVec::Double(datavec)
             }
             _ => DataTypeVec::Void(Vec::new()), // Stump implementation until I can get some feedback on generics
-        };
-
+        };        
         Ok(datavec)
     }
 }
@@ -332,7 +332,7 @@ impl TdmsFile {
 
         let object_map = self.all_objects.get(path).ok_or(TdmsError { kind: TdmsErrorKind::ChannelNotFound})?;
 
-        let data = self.handle.read_data_vector(&object_map)?;
+        let data = self.handle.read_data_vector(object_map)?;
 
         Ok(data)
     }
@@ -544,7 +544,7 @@ impl TdmsSegment {
                     // if the object has a previous entry update it and push to new map, we remove here so that we don't miss any objects that aren't in the new list. At the end we'll append those on.
                     object_map.last_object = object.clone();
                     object_map.read_map.append(&mut new_read_map);
-                    object_map.total_bytes = object_map.total_bytes + object.total_size;
+                    object_map.total_bytes += object.total_size;
                     new_map.insert(key, object_map);
                 } else {
                     // push the new object
@@ -578,7 +578,7 @@ impl TdmsSegment {
                 
                 // Update the entry with the current instance of the object, along with the new total size for this object, leave the readmap as we'll update it later
                 existing_object.last_object = object.clone();
-                existing_object.total_bytes = existing_object.total_bytes + object.total_size;
+                existing_object.total_bytes += object.total_size;
                 
             }
             
@@ -588,11 +588,11 @@ impl TdmsSegment {
 
             // First we have to establish the correct chunk_size computation accounting for all live_objects
             for (_key, object_map) in file.live_objects.iter_mut() {
-                new_chunk_size = new_chunk_size + object_map.last_object.total_size; 
+                new_chunk_size += object_map.last_object.total_size; 
             }
 
             // Because of the way it was computed, meta_data chunk size was incorrectly calculated prior to this point (only accounted for new objects), update with the comprehensive calc
-            meta_data.chunk_size = meta_data.chunk_size + new_chunk_size;
+            meta_data.chunk_size += new_chunk_size;
 
             let no_chunks: u64 = if meta_data.chunk_size > 0 {
                 (self.next_seg_offset - self.raw_data_offset) / meta_data.chunk_size

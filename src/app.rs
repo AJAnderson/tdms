@@ -1,16 +1,13 @@
 use eframe::egui::ScrollArea;
 use eframe::{egui, epi};
-use egui::plot::{Line, Plot, Value, Values};
+use egui::plot::{Line, Value, Values};
 use rfd::FileDialog;
 use rstdms::{DataTypeVec, TdmsError, TdmsFile};
 use std::path::PathBuf;
 
 pub struct TemplateApp {
     // Example stuff:
-    label: String,
-    filepath: PathBuf,
     file_handle: Option<TdmsFile>,
-    value: f32,
     channel_strings: Vec<String>,
     selected_channel: Option<String>,
     cached_data: Option<Values>,
@@ -19,11 +16,7 @@ pub struct TemplateApp {
 impl Default for TemplateApp {
     fn default() -> Self {
         Self {
-            // Example stuff:
-            label: "Hello World!".to_owned(),
-            filepath: PathBuf::default(),
             file_handle: None,
-            value: 2.7,
             channel_strings: Vec::new(),
             selected_channel: None,
             cached_data: None,
@@ -34,7 +27,7 @@ impl Default for TemplateApp {
 // Helper functions for loading channels, calls out to rstdms lib functions
 impl TemplateApp {
     fn open_dialog(&mut self) {
-        if let Some(path) = rfd::FileDialog::new().pick_file() {
+        if let Some(path) = FileDialog::new().pick_file() {
             let tdms_file = TdmsFile::open(&path).unwrap();
             self.file_handle = Some(tdms_file)
         }
@@ -91,11 +84,11 @@ impl epi::App for TemplateApp {
                 if ui.button("Load File").clicked() {
                     self.open_dialog()
                 }
-                let mut scroll_area = ScrollArea::auto_sized();
+                let scroll_area = ScrollArea::auto_sized();
 
                 let (current_scroll, max_scroll) = scroll_area.show(ui, |ui| {
                     if self.channel_strings.len() > 0 {
-                        for (i, channel) in self.channel_strings.iter().enumerate() {
+                        for (_i, channel) in self.channel_strings.iter().enumerate() {
                             if ui
                                 .add(egui::SelectableLabel::new(
                                     false,
@@ -150,14 +143,5 @@ impl epi::App for TemplateApp {
             // ui.add(egui::plot::Plot::new("Channel").line(line).view_aspect(1.0));
             // egui::warn_if_debug_build(ui);
         });
-
-        if false {
-            egui::Window::new("Window").show(ctx, |ui| {
-                ui.label("Windows can be moved by dragging them.");
-                ui.label("They are automatically sized based on contents.");
-                ui.label("You can turn on resizing and scrolling if you like.");
-                ui.label("You would normally chose either panels OR windows.");
-            });
-        }
     }
 }

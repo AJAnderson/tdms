@@ -308,5 +308,21 @@ Ahahaha, just checked my cargo.tomly and it's already there, not sure what I was
 
 ndarray_npy seems like it has some clever ideas for apparent genericism as well (https://docs.rs/ndarray-npy/0.8.0/ndarray_npy/index.html) but it does have a really obvious end point that it's targetting
 
+10/9/2021
+
+The generic struct didn't really feel like it was going anywhere. Looking instead at some simple things like incorporating adams generic over endianess approach. Also looking at perhaps refactoring a bit away from one monolith
+
+Tried to use "read_into" to read multiple bytes in one go rather than iterating the for loop, but Vec::with_capacity doesn't actually create a slice that can be indexed, the memory is uninitialized.
+
+11/9/2021
+
+Doing some reading implied that initializing the memory i.e. vec![0; N] is likely slower, but maybe it's a non-issue? I assume that the same rules apply to arrays or alt that arrays are always initialized to something. Yes, teh second, MaybeUninit is required to allow arrays to be instantiated uninitialized.
+
+Got the read_into version working, it feels a bit faster in gui land, which I hope is because my stupid load from file every time approach is acting as a stress test lol.
+
++ Cleared the chart stuff out of main
++ Cleared a bunch of warnings related to unused imports, unused variables etc 
++ Addressed a bunch of clippy lints (manual assign, pointless dereference)
+
 
 
