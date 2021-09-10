@@ -296,5 +296,17 @@ All I could eliminate was the load so it's only slightly faster. Tried to cache 
 
 Removed caching, the creator of egui said painting dense lines is slow and they should be downsampled prior to painting to make them easier to handle. That's a future problem.
 
+End of day:
+Stuck on trying to make the datavector generic. The only way is for the datavectors or its constituents (?) to all conform to a trait contract and then for generic functions to work with them. Feels like going back in circles to thoughts I  was having a long time ago.
+
+What if I were to provide "as xx" implementations for standard types? Maybe a large matrix of possibility unless From/Into is clever (is it even the right thing?)
+
+30/8/2021
+Doing some research on how to make things generic. I think I could use something like the num-traits crate to provide a mechanism for at least making all the numeric raw types usable in the same way. But I'm not sure if that would really help the end user unless they also happened to be using num-traits. They do provide big ints and complex numbers, and they have a huge install base so probably a lot of interop.
+
+Ahahaha, just checked my cargo.tomly and it's already there, not sure what I was doing with it though. Ahh, I was using it for FromPrimitive, to convert the primitive into a value of an enum, applied by #deriving it for DataTypeRaw. Adam uses num_enum::TryFromPrimitive in a similar way
+
+ndarray_npy seems like it has some clever ideas for apparent genericism as well (https://docs.rs/ndarray-npy/0.8.0/ndarray_npy/index.html) but it does have a really obvious end point that it's targetting
+
 
 

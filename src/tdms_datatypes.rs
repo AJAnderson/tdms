@@ -144,6 +144,9 @@ pub enum DataTypeVec {
     TimeStamp(Vec<TdmsTimeStamp>),
 }
 
+// #[derive(Debug, Clone)]
+// pub struct DataTypeVec<T>(Vec<T>);
+
 // Notes: Strings are stored concatenated in the raw data block with an array of offsets for each
 // string's first character stored first in the raw data according to the Tdms Reference.
 // In practise (in the Example.tdms file in this repo), this does not appear to be the case.
