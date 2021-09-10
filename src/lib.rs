@@ -181,7 +181,7 @@ impl FileHandle {
     /// everything all the time? It feels extremely wasteful.
 
     // TODO: Needs MAJOR work
-    // #[rustfmt::skip]
+    #[rustfmt::skip]
     pub fn read_data_vector(&mut self, object_map: &ObjectMap) -> Result<DataTypeVec, TdmsError> {
         let read_pairs = &object_map.read_map;
         let rawtype = object_map.last_object.raw_data_type.ok_or(TdmsError {kind: TdmsErrorKind::ObjectHasNoRawData})?;
@@ -189,6 +189,8 @@ impl FileHandle {
         let endianness = &object_map.endianness;
         
         // TODO boilerplate here
+        
+
         let datavec: DataTypeVec = match rawtype {
             DataTypeRaw::TdmsString => {
                 let mut datavec: Vec<String> = Vec::new();
@@ -212,13 +214,14 @@ impl FileHandle {
             DataTypeRaw::DoubleFloat => {                
                 let mut datavec: Vec<f64> = Vec::with_capacity((total_bytes / 8) as usize);
                 
+                let mut tracker: usize = 0;
+                
                 for pair in read_pairs {                    
                     self.handle.seek(SeekFrom::Start(pair.start_index))?;
-                    for _i in 0..(pair.no_bytes / 8) {                        
-                        datavec.push(self.handle.read_f64::<LE>()?);
-                    }                    
+                    self.handle.read_f64_into::<LE>(&mut datavec[tracker..tracker+pair.no_bytes as usize/8])?;
+                    tracker = tracker + pair.no_bytes as usize;                                      
                 }
-                DataTypeVec::Double(datavec) 
+                DataTypeVec::Double(datavec)
             }
             _ => DataTypeVec::Void(Vec::new()), // Stump implementation until I can get some feedback on generics
         };
