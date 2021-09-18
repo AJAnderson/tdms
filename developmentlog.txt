@@ -324,5 +324,46 @@ Got the read_into version working, it feels a bit faster in gui land, which I ho
 + Cleared a bunch of warnings related to unused imports, unused variables etc 
 + Addressed a bunch of clippy lints (manual assign, pointless dereference)
 
+Committed
 
+Starting work on generic reader functions. Notes as I go:
+- Back to some file.handle.handle stuff which just looks terrible. I'm going to get rid of FileHandle
 
++ Deleted FileHandle and moved it's impls to TdmsFile
+
+- At the load_data level (public api) in the current architecture I need to be able to know what the endianess so I can call read_data_vector with endianess defined
+- Following the builder pattern really overcomplicated things I think. Removing un-necessary builder patterns.
+
++ Got rid of the builder pattern from TdmsMetadata and TdmsObject, end up wondering why they're impls against the struct given they don't take a self parameter.
+
+- Don't appear to be able to store endianness in an enum and then use it as a type annotation. Confirmed not possible, rust doesn't try to infer anything about the variants of an enum. Not sure whether to chop it out completely. Adam split the read immediately after he read the ToC flag and passed it into the function in an if/else with the type annotation (BigEndian) hard coded.
+- Just figured out the endianness enum only compiled because it was ignoring me trying to put the byteorder enums into it. It actually totally makes no sense.
+
++ Replacing endianess with a simple bool
+
+- Next need to kill the builder pattern for segment
+
+12/9/2021
+
+I tried to create a struct:
+struct Endianness<T: ByteOrder> {
+    e: T,
+}
+
+it doesn't work because there's no valid constructor for the Endianness enums provided by byteorder.
+
+Still stuck on read_data_vector, have figured out how to record the endianess (went back to keeping it in objectmap) but now I get ownership issues trying to borrow the object map for key information and also borrow self to read the file handle.
+
+Ok got it back to a compiling point
+
+Copying out all these vector read methods are exactly as shit as I imagined, super easy to fuck up the # of bytes to turn total_bytes into #values
+
+Implemented down to Double in the vectors
+
+Things I'm not currently handling:
+- Extended (128)
+- Floats with units
+- ComplexNumbers
+- Daqmx
+
+Apparently NI doesn't even support writing complex numbers to tdms so shrug on that for now.

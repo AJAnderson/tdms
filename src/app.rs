@@ -3,7 +3,6 @@ use eframe::{egui, epi};
 use egui::plot::{Line, Value, Values};
 use rfd::FileDialog;
 use rstdms::{DataTypeVec, TdmsError, TdmsFile};
-use std::path::PathBuf;
 
 pub struct TemplateApp {
     // Example stuff:

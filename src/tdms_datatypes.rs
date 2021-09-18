@@ -1,3 +1,5 @@
+use std::iter::IntoIterator;
+
 use crate::tdms_error::{TdmsError, TdmsErrorKind};
 use num_derive::FromPrimitive;
 
@@ -142,6 +144,16 @@ pub enum DataTypeVec {
     // ComplexSingle(Vec<??>)
     // CompledDouble(Vec<??>)
     TimeStamp(Vec<TdmsTimeStamp>),
+}
+
+pub struct DataTypeVec<T> {Vec<T>}
+
+impl<T> Iterator for DataTypeVec<T> {
+    type Item = T;
+
+    fn next<T>(&mut self) -> Option<Self::Item> {
+        
+    }
 }
 
 // #[derive(Debug, Clone)]
