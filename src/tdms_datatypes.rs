@@ -121,39 +121,54 @@ pub enum DataType {
 /// element coming with information about what datatype it was which
 /// was un-necessary and looked gross
 /// See TdmsFileHandle::read_data_vector for the point of implementation
+// #[derive(Debug, Clone)]
+// pub enum DataTypeVec {
+//     Void(Vec<()>),      // Should nuke this somehow
+//     Boolean(Vec<bool>), // nptdms uses 1 byte, I'm not sure this is correct as LV internal representation is 32 bits for a bool
+//     I8(Vec<i8>),
+//     I16(Vec<i16>),
+//     I32(Vec<i32>),
+//     I64(Vec<i64>),
+//     U8(Vec<u8>),
+//     U16(Vec<u16>),
+//     U32(Vec<u32>),
+//     U64(Vec<u64>),
+//     Float(Vec<f32>),
+//     Double(Vec<f64>),
+//     //Extended(Vec<f128>), Can't represent this currently
+//     FloatUnit(Vec<FloatWithUnit<f32>>),
+//     DoubleUnit(Vec<FloatWithUnit<f64>>),
+//     //ExtendedUnit(Vec<FloatWithUnit<f128>>), Can't represent this
+//     TdmsString(Vec<String>),
+//     // DaqMx(Vec<??>)
+//     // ComplexSingle(Vec<??>)
+//     // CompledDouble(Vec<??>)
+//     TimeStamp(Vec<TdmsTimeStamp>),
+// }
+
 #[derive(Debug, Clone)]
-pub enum DataTypeVec {
-    Void(Vec<()>),      // Should nuke this somehow
-    Boolean(Vec<bool>), // nptdms uses 1 byte, I'm not sure this is correct as LV internal representation is 32 bits for a bool
-    I8(Vec<i8>),
-    I16(Vec<i16>),
-    I32(Vec<i32>),
-    I64(Vec<i64>),
-    U8(Vec<u8>),
-    U16(Vec<u16>),
-    U32(Vec<u32>),
-    U64(Vec<u64>),
-    Float(Vec<f32>),
-    Double(Vec<f64>),
-    //Extended(Vec<f128>), Can't represent this currently
-    FloatUnit(Vec<FloatWithUnit<f32>>),
-    DoubleUnit(Vec<FloatWithUnit<f64>>),
-    //ExtendedUnit(Vec<FloatWithUnit<f128>>), Can't represent this
-    TdmsString(Vec<String>),
-    // DaqMx(Vec<??>)
-    // ComplexSingle(Vec<??>)
-    // CompledDouble(Vec<??>)
-    TimeStamp(Vec<TdmsTimeStamp>),
+pub struct DataTypeVec {
+    datatype: DataTypeRaw,
+    data: Vec<Box<dyn Something>>,
 }
 
-pub struct DataTypeVec<T> {Vec<T>}
+pub trait Something<T> {
+    fn make_native(&self) -> Vec<T>;
+}
+
+impl Something<u8> for DataTypeVec {
+    fn make_native(&self) -> Result<Vec<u8>, TdmsError> {
+        match self.datatype {
+            DataTypeRaw::U8 => self.data,
+            _ => TdmsErrorKind::ChannelDoesNotMatchDataType,
+        }
+    }
+}
 
 impl<T> Iterator for DataTypeVec<T> {
     type Item = T;
 
-    fn next<T>(&mut self) -> Option<Self::Item> {
-        
-    }
+    fn next<T>(&mut self) -> Option<Self::Item> {}
 }
 
 // #[derive(Debug, Clone)]

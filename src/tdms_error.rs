@@ -20,6 +20,7 @@ pub enum TdmsErrorKind {
     NoPreviousSegment, // An attempt was made to index the most recent segment but it does not exist
     ChannelNotFound,   // Couldn't load the requested data because it does not appear in the file
     ObjectHasNoRawData, // The object doesn't contain any raw data, may want to try just returning the properties.
+    ChannelDoesNotMatchDataType,
 }
 
 impl fmt::Display for TdmsError {
@@ -33,7 +34,8 @@ impl fmt::Display for TdmsError {
             TdmsErrorKind::NoMetaDataAvailable => write!(f, "An attempt was made to access segment metadata which doesn't exist")?,
             TdmsErrorKind::NoPreviousSegment => write!(f, "An attempt was made to index the most recent segment but it does not exist")?,
             TdmsErrorKind::ChannelNotFound => write!(f, "The requested channel is not in the channel list, ensure special characters are correctly escaped")?,
-            TdmsErrorKind::ObjectHasNoRawData => write!(f, "The requested object does not contain any raw data")?,}
+            TdmsErrorKind::ObjectHasNoRawData => write!(f, "The requested object does not contain any raw data")?,
+            TdmsErrorKind::ChannelDoesNotMatchDataType =>  write!(f, "The datatype requested does not match the datatype of the channel")?,}
         Ok(())
     }
 }
