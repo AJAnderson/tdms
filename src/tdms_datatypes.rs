@@ -3,8 +3,10 @@ use std::io::{Read, Seek};
 
 use crate::tdms_error::{TdmsError, TdmsErrorKind};
 use num_derive::FromPrimitive;
+use num_enum::IntoPrimitive;
 use byteorder::{BE, LE, *};
 
+#[derive(IntoPrimitive, Debug)]
 #[repr(u32)]
 pub enum TocProperties {
     KTocMetaData = 1 << 1,        // segment contains meta data
@@ -12,7 +14,23 @@ pub enum TocProperties {
     KTocDAQmxRawData = 1 << 7,    // segment contains DAQmx raw data
     KTocInterleavedData = 1 << 5, // raw data is interleaved (else continuous)
     KTocBigEndian = 1 << 6,       // all numeric values in segment are bigendian (including lead in)
-    KTocNewObjList = 1 << 2,      // channels in this segment are not the same as the previous
+    KTocNewObjList = 1 << 2,      // first segment, or order has changed (is not present when channel is added)
+}
+
+#[derive(Debug)]
+pub struct TocMask {
+    flags: u32,
+}
+
+impl TocMask {
+    pub fn from_flags(flags: u32) -> TocMask {
+        TocMask { flags }
+    }
+
+    pub fn has_flag(&self, flag: TocProperties) -> bool {
+        let flag_val: u32 = flag.into();
+        (self.flags & flag_val) == flag_val
+    }
 }
 
 /// The DataTypeRaw enum's values match the binary representation in

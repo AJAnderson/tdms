@@ -381,7 +381,7 @@ I also like the way his read stuff lives by the types and is out of the way of t
 
 Will start by extracting the file handle stuff from my TdmsFile struct, akin to what Adam has done and feel it out
 
-28/2/2022
+28/1/2022
 
 Apart half way through ripping it apart and re-factoring. Currently working on trying to re-factor the segment reading code so it's a method on TdmsMap instead of TdmsSegment
 
@@ -397,7 +397,7 @@ It probably actually makes sense to put  the reader thing back in, but I might j
 
 Also hitting issues with the Object read code need to tidy up the responsibilities.
 
-29/2/2022
+29/1/2022
 
 Continuing from above, tidying up the UI code which has changed API with a version bump
 
@@ -413,3 +413,12 @@ It's still super slow to just get ahold of the channel names.
 Also now all the channels are panicking at 'not_implemented'
 
 I think I broke the object map by removing that low level copy op, need to go over the algorithm again to figure out what I did
+
+30/1/2022
+
+Thinking about the algorithm, the whole live_objects list just exists to keep order, it shouldn't be necessary to maintain a whole copy of
+the object just to do that.
+
+It could just be a vector of names (as IDs)?
+
+When kTocNewObjList is set and all the channels are enumerated again, it's NOT required to provide the properties again. So if properties don't change, then simply cloning over the top for last_object will lose the previously accumulated properties

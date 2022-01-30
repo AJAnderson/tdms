@@ -9,7 +9,7 @@ use std::path;
 use byteorder::{BE, LE, *};
 use log::debug;
 pub mod tdms_datatypes;
-pub use tdms_datatypes::{DataType, DataTypeRaw, DataTypeVec, TocProperties, read_datatype, read_string};
+pub use tdms_datatypes::{DataType, DataTypeRaw, DataTypeVec, TocProperties, TocMask, read_datatype, read_string};
 pub mod tdms_error;
 pub use tdms_error::{TdmsError, TdmsErrorKind};
 
@@ -127,7 +127,7 @@ pub fn current_loc<R: Read + Seek>(reader: &mut R) {
 pub struct TdmsMap {    
     segments: Vec<TdmsSegment>,    
     pub all_objects: IndexMap<String, ObjectMap>, // Keeps track of all objects in file and their read maps, order not important for this one, using indexmap to avoid running multiple hashmap types.
-    live_objects: IndexMap<String, ObjectMap>, // Keeps track of order and data size of objects accumulated over segments, is reset when kToCNewObjectList flag is detected
+    live_objects: Vec<String>, // Keeps track of order and data size of objects accumulated over segments, is reset when kToCNewObjectList flag is detected
 }
 
 
@@ -136,7 +136,7 @@ impl TdmsMap {
         Ok(TdmsMap {
             segments: Vec::new(),            
             all_objects: IndexMap::new(),
-            live_objects: IndexMap::new(),
+            live_objects: Vec::new(),
         })
     }    
 
@@ -339,13 +339,13 @@ impl TdmsMap {
         // Convert the critical lead in information to appropriate representation, we know the 
         // first part of the lead in is little endian so we save a check here.
         segment.file_tag = reader.read_u32::<LE>()?;
-        segment.toc_mask = reader.read_u32::<LE>()?;
+        segment.toc_mask = TocMask::from_flags(reader.read_u32::<LE>()?);
 
         debug!("File tag: {}", segment.file_tag);
-        debug!("toc_mask: {:b}", segment.toc_mask);
+        debug!("toc_mask: {:?}", segment.toc_mask);
 
 
-        if (segment.toc_mask & TocProperties::KTocBigEndian as u32) != 0 {
+        if segment.toc_mask.has_flag(TocProperties::KTocBigEndian) {
             self.read_metadata::<R, BE>(reader, segment)
         } else {
             self.read_metadata::<R, LE>(reader, segment)
@@ -366,7 +366,7 @@ impl TdmsMap {
 
         // Update the object maps
         // TODO: This still does not handle interleaved data at all
-        if (segment.toc_mask & TocProperties::KTocNewObjList as u32) != 0 {
+        if segment.toc_mask.has_flag(TocProperties::KTocNewObjList) {
             // if new_obj list has been set, then the chunk size as reported by new metadata is 
             // everything and we could have a totally new ordering of data for this segment. 
             // This will reset the live_objects map
@@ -380,7 +380,7 @@ impl TdmsMap {
             segment.no_chunks = no_chunks;
 
             // create new map of objects
-            let mut new_map: IndexMap<String, ObjectMap> = IndexMap::new();            
+            let mut new_map: Vec<String> = Vec::new();            
                  
             let mut relative_position: u64 = 0; // Used in computing read pairs as we go
             for object in meta_data.objects.iter() {
@@ -397,41 +397,38 @@ impl TdmsMap {
                 }
 
                 // pull objects by key using new object list and update then insert updated or new objects into new objectmap
-                if let Some((key, mut object_map)) = self.all_objects.remove_entry(&object.object_path) {
-                    // if the object has a previous entry update it and push to new map, we remove here so that we don't miss any objects that aren't in the new list. At the end we'll append those on.
+                if let Some(mut object_map) = self.all_objects.get_mut(&object.object_path) {                    
                     object_map.last_object = object.clone();
                     object_map.read_map.append(&mut new_read_map);
-                    object_map.total_bytes += object.total_size;
-                    new_map.insert(key, object_map);
+                    object_map.total_bytes += object.total_size;                    
                 } else {
-                    // push the new object
-                    new_map.insert(object.object_path.clone(), 
-                    ObjectMap { 
+                    // construct a new object and push to all_objects map
+                    let new_obj_map = ObjectMap { 
                         last_object: object.clone(), 
                         read_map: new_read_map, 
                         total_bytes: object.total_size,
-                        bigendian: segment.toc_mask & TocProperties::KTocBigEndian as u32 != 0});                    
+                        bigendian: segment.toc_mask.has_flag(TocProperties::KTocBigEndian)};
+
+                    self.all_objects.insert(object.object_path.clone(), new_obj_map);
                 }
                 relative_position += object.total_size;
+
+                // Push the object path to the live_objects replacement
+                new_map.push(object.object_path.clone());
             }           
             
             // At this point all objects are into a map in their correct order, update the live_objects map for future use.
-            self.live_objects = new_map.clone();
-            
-            // at this point we've re-ordered objects that are recorded in the new list, but we want to keep around old objects which weren't in this segment as well, so we join what's left in all_objects and update the old map
-            // new_map.extend(file.all_objects.drain(..));
-            // file.all_objects = new_map;
-            self.all_objects.extend(new_map);
+            self.live_objects = new_map;            
 
         } else {
-            // Need to iterate over new list of objects, check if it's in live objects and update, otherwise append it to live objects under a new key.
+            // Need to iterate over new list of objects, check if it's in all_objects and update, otherwise update live objects
             for object in meta_data.objects.iter() {                
-                // Check if it's in the live_objects map and update otherwise insert (presumably at end)
-                let mut existing_object = self.live_objects.entry(object.object_path.clone()).or_insert(ObjectMap { 
+                // Check if it's in the all_objects map and update otherwise insert (presumably at end)
+                let mut existing_object = self.all_objects.entry(object.object_path.clone()).or_insert(ObjectMap { 
                     last_object: object.clone(), 
                     read_map: Vec::new(), 
                     total_bytes: object.total_size,
-                    bigendian: segment.toc_mask & TocProperties::KTocBigEndian as u32 != 0});
+                    bigendian: segment.toc_mask.has_flag(TocProperties::KTocBigEndian)});
                 
                 // Update the entry with the current instance of the object, along with the new total size for this object, leave the readmap as we'll update it later
                 existing_object.last_object = object.clone();
@@ -490,7 +487,7 @@ impl TdmsMap {
 pub struct TdmsSegment {
     // Segment lead in data is 28 bytes long
     file_tag: u32, // "TDSm" always the same
-    toc_mask: u32, // binary mask which generates the following flags, see tdms_datatypes.rs for reference on what each is.
+    toc_mask: TocMask, // binary mask which generates the following flags, see tdms_datatypes.rs for reference on what each is.
     version_no: u32,
     next_seg_offset: u64,
     raw_data_offset: u64,
@@ -505,7 +502,7 @@ pub struct TdmsSegment {
 impl fmt::Display for TdmsSegment {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "Segment filetag:\t{:X}", self.file_tag)?;
-        writeln!(f, "Segment metadata:\t{:b}", self.toc_mask)?;
+        writeln!(f, "Segment metadata:\t{:?}", self.toc_mask)?;
         writeln!(f, "Version no.:\t\t{}", self.version_no)?;
         writeln!(f, "Next segment offset:\t{}", self.next_seg_offset)?;
         writeln!(f, "Raw data offset:\t{}", self.raw_data_offset)?;
@@ -520,7 +517,7 @@ impl TdmsSegment{
         TdmsSegment {
             start_index: start_index,
             file_tag: 0,
-            toc_mask: 0,
+            toc_mask: TocMask{flags:0},
             version_no: 0,        
             next_seg_offset: 0,
             raw_data_offset: 0,
