@@ -367,3 +367,49 @@ Things I'm not currently handling:
 - Daqmx
 
 Apparently NI doesn't even support writing complex numbers to tdms so shrug on that for now.
+
+27/1/2022
+
+Back on the horse, trying to come up with a reasonable API for the library, 2 goals, plug into polars and plug into plotting software I'll write.
+
+I'm converging towards what Adam was doing with a "generic over reader" signature for the functions.
+
+Also towards stripping out the DataType enum or at least its implementation currently. It's really only used to wrap an Object Property value. To be fair to myself
+Adam's solution is identical, just better organized (not dependent on being called from within a method acting on a "File" struct)
+
+I also like the way his read stuff lives by the types and is out of the way of the rest of the actual walking the file.
+
+Will start by extracting the file handle stuff from my TdmsFile struct, akin to what Adam has done and feel it out
+
+28/2/2022
+
+Apart half way through ripping it apart and re-factoring. Currently working on trying to re-factor the segment reading code so it's a method on TdmsMap instead of TdmsSegment
+
+Changes so far:
++ Changed TdmsFile -> TdmsMap
++ Removed all methods from TdmsSegment, only remaining thing is a Display implementation
++ Removed the Filehandle from TdmsMap as a maintained element, the reader gets instantiated in the open function but not stored
++ Moved TdmsSegment reading methods into TdmsMap and re-combined read_leadin with read_segment
++ Stopped storing booleans for the ToCMask flags, just storing ToCMask now
++ Instantiate segment in read_segment
+
+It probably actually makes sense to put  the reader thing back in, but I might just be wrestling with the public API too early.
+
+Also hitting issues with the Object read code need to tidy up the responsibilities.
+
+29/2/2022
+
+Continuing from above, tidying up the UI code which has changed API with a version bump
+
+Further changes
++ Updated app.rs to be congruent with the latest version of egui
++ Moved all the helper functions under the new TdmsFile struct which has the TdmsMap struct as a field.
++ Deleted object copying from the lowest level object read function, this should only happen as part of the update index step of
+read meta data (this should become its own function.)
++ Now generic over reader everywhere, so it'd be interesting to swap to something other than bufreader at some point
+
+It's still super slow to just get ahold of the channel names.
+
+Also now all the channels are panicking at 'not_implemented'
+
+I think I broke the object map by removing that low level copy op, need to go over the algorithm again to figure out what I did

@@ -2,7 +2,7 @@ use eframe::egui::ScrollArea;
 use eframe::{egui, epi};
 use egui::plot::{Line, Value, Values};
 use rfd::FileDialog;
-use rstdms::{DataTypeVec, TdmsError, TdmsFile};
+use rstdms::{DataTypeVec, TdmsFile};
 
 pub struct TemplateApp {
     // Example stuff:
@@ -28,6 +28,7 @@ impl TemplateApp {
     fn open_dialog(&mut self) {
         if let Some(path) = FileDialog::new().pick_file() {
             let tdms_file = TdmsFile::open(&path).unwrap();
+            println!("{:?}", tdms_file.tdms_map.all_objects);
             self.file_handle = Some(tdms_file)
         }
 
@@ -35,8 +36,7 @@ impl TemplateApp {
     }
 
     fn populate_channels(&mut self) {
-        for channel in self.file_handle.as_ref().expect("No chans").objects() {
-            println!("{:?}", channel.clone());
+        for channel in self.file_handle.as_ref().expect("No chans").objects() {            
             self.channel_strings.push(channel.to_string());
         }
     }
@@ -44,29 +44,16 @@ impl TemplateApp {
 
 impl epi::App for TemplateApp {
     fn name(&self) -> &str {
-        "egui template"
-    }
-
-    /// Called by the framework to load old app state (if any).
-    // #[cfg(feature = "persistence")]
-    // fn setup(
-    //     &mut self,
-    //     _ctx: &egui::CtxRef,
-    //     _frame: &mut epi::Frame<'_>,
-    //     storage: Option<&dyn epi::Storage>,
-    // ) {
-    //     if let Some(storage) = storage {
-    //         *self = epi::get_value(storage, epi::APP_KEY).unwrap_or_default()
-    //     }
-    // }
+        "TDMS Reader"
+    }    
 
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
-    fn update(&mut self, ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>) {
+    fn update(&mut self, ctx: &egui::CtxRef, frame: &epi::Frame) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
             egui::menu::bar(ui, |ui| {
-                egui::menu::menu(ui, "File", |ui| {
+                ui.menu_button( "File", |ui| {
                     if ui.button("Quit").clicked() {
                         frame.quit();
                     }
@@ -83,7 +70,7 @@ impl epi::App for TemplateApp {
                 if ui.button("Load File").clicked() {
                     self.open_dialog()
                 }
-                let scroll_area = ScrollArea::auto_sized();
+                let scroll_area = ScrollArea::new([false,true]);
 
                 let (current_scroll, max_scroll) = scroll_area.show(ui, |ui| {
                     if self.channel_strings.len() > 0 {
@@ -116,8 +103,12 @@ impl epi::App for TemplateApp {
 
             // If we have a chan_path then load it if we haven't already
             if let Some(chan_path) = self.selected_channel.clone() {
-                match self.file_handle.as_mut().unwrap().load_data(&chan_path) {
-                    Ok(data) => match &data {
+                let result = self.file_handle.as_mut().unwrap().load_data(&chan_path);
+                println!("{:?}",result);
+                match result {
+                    Ok(data) => {
+                    println!("{:?}",data);
+                    match &data {
                         DataTypeVec::Double(datavector) => {
                             let vecy = (0..datavector.len()).map(|i| {
                                 let x = i as f64;
@@ -125,10 +116,10 @@ impl epi::App for TemplateApp {
                             });
 
                             let line = Line::new(Values::from_values_iter(vecy));
-                            ui.add(egui::plot::Plot::new("Channel").line(line).view_aspect(1.0));
+                            egui::plot::Plot::new("Channel").view_aspect(1.0).show(ui, |plot_ui| plot_ui.line(line));
                         }
                         _ => unimplemented!(),
-                    },
+                    }},
                     _ => unimplemented!(),
                 }
             };
