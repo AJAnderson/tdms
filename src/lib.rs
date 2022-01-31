@@ -2,8 +2,7 @@ use indexmap::{IndexMap};
 use std::fmt;
 use std::fs;
 use std::io;
-use std::io::BufReader;
-use std::io::{ErrorKind, Read, Seek, SeekFrom};
+use std::io::{BufReader, ErrorKind, Read, Seek, SeekFrom};
 use std::path;
 
 use byteorder::{BE, LE, *};
@@ -72,7 +71,7 @@ impl fmt::Display for ObjectMap {
 //handle: io::BufReader<std::fs::File>,
 
 pub struct TdmsFile {
-    reader: io::BufReader<fs::File>,
+    reader: BufReader<fs::File>,
     pub tdms_map: TdmsMap,    
 }
 

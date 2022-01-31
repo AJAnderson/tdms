@@ -5,7 +5,7 @@ use crate::tdms_error::{TdmsError, TdmsErrorKind};
 use crate::TdmsMap;
 use num_derive::FromPrimitive;
 use num_enum::IntoPrimitive;
-use byteorder::{BE, LE, *};
+use byteorder::*;
 
 #[derive(IntoPrimitive, Debug)]
 #[repr(u32)]

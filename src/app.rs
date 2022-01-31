@@ -9,7 +9,8 @@ pub struct TemplateApp {
     file_handle: Option<TdmsFile>,
     channel_strings: Vec<String>,
     selected_channel: Option<String>,
-    cached_data: Option<Values>,
+    previous_selection: Option<String>,
+    cached_data: Option<DataTypeVec>,
 }
 
 impl Default for TemplateApp {
@@ -18,6 +19,7 @@ impl Default for TemplateApp {
             file_handle: None,
             channel_strings: Vec::new(),
             selected_channel: None,
+            previous_selection: None,
             cached_data: None,
         }
     }
@@ -83,7 +85,8 @@ impl epi::App for TemplateApp {
                                 .clicked()
                             {
                                 // copy in channel path (Todo: This could just be a reference to the vector index)
-                                self.selected_channel = Some(channel.clone());
+                                self.previous_selection = self.selected_channel.clone();
+                                self.selected_channel = Some(channel.clone());                                
                             }
                         }
                     };
@@ -102,24 +105,44 @@ impl epi::App for TemplateApp {
             ui.heading("Main plot");
 
             // If we have a chan_path then load it if we haven't already
-            if let Some(chan_path) = self.selected_channel.clone() {
-                let result = self.file_handle.as_mut().unwrap().load_data(&chan_path);                
-                match result {
-                    Ok(data) => {                    
-                    match &data {
+            if self.selected_channel != self.previous_selection {
+                if let Some(chan_path) = self.selected_channel.clone() {
+                    let result = self.file_handle.as_mut().unwrap().load_data(&chan_path);                
+                    match result {
+                        Ok(data) => {
+                        self.cached_data = Some(data.clone());                        
+                        match &data {
+                            DataTypeVec::Double(datavector) => {
+                                let vecy = (0..datavector.len()).map(|i| {
+                                    let x = i as f64;
+                                    Value::new(x, datavector[i])
+                                });
+
+                                let line = Line::new(Values::from_values_iter(vecy.clone()));
+                                egui::plot::Plot::new("Channel").view_aspect(1.0).show(ui, |plot_ui| plot_ui.line(line));
+                                self.previous_selection = self.selected_channel.clone();                                
+                            }
+                            _ => unimplemented!(),
+                        }},
+                        _ => unimplemented!(),
+                    }
+                }
+            } else {
+                if let Some(chan_path) = self.selected_channel.clone() {
+                    match &self.cached_data.clone().unwrap() {
                         DataTypeVec::Double(datavector) => {
                             let vecy = (0..datavector.len()).map(|i| {
                                 let x = i as f64;
                                 Value::new(x, datavector[i])
                             });
 
-                            let line = Line::new(Values::from_values_iter(vecy));
+                            let line = Line::new(Values::from_values_iter(vecy.clone()));
                             egui::plot::Plot::new("Channel").view_aspect(1.0).show(ui, |plot_ui| plot_ui.line(line));
+                            self.previous_selection = self.selected_channel.clone();                                
                         }
                         _ => unimplemented!(),
-                    }},
-                    _ => unimplemented!(),
-                }
+                    };
+                };
             };
 
             // Display something

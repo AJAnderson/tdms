@@ -448,3 +448,9 @@ to report a change in the number of values, need to figure out how not to update
 Have introduced a crash on the kTocNewObjList arm when unwrapping, not sure how it's possible there's no object in the list.
 
 + Fixed the crash, but then I think I stopped it loading fast again. I think because it wasn't actually running the indexing calcs because of a previous error.
+
+After a long discussion with the autho of egui, it's apparent that the plotting logic there is not really built
+to handle 100k+ points in a graph. He suggests downsampling before feeding to the renderer and believes that it's
+not the forming of Lines and Values which is at issue, but the tesselation and rendering itself which is slow.
+
+I can tidy that code up to load into the cache then displayed. Then can look at sub-sampling as well.
