@@ -422,3 +422,29 @@ the object just to do that.
 It could just be a vector of names (as IDs)?
 
 When kTocNewObjList is set and all the channels are enumerated again, it's NOT required to provide the properties again. So if properties don't change, then simply cloning over the top for last_object will lose the previously accumulated properties
+
+Replaced the look up and update of the object which occurs in the object read code as it was allowing me to update the properties in place.
+
+Moved read_object into TdmsMap implementation so it can access self, not quite sure if this, or passing in the TdmsMap as a parameter is better. Don't actually know if the second is possible when the function is being called from a method on TdmsMap. So will give it a try.
+
+Also, I think I haven't actually set it up to update the all_objects map in place from within the reader, so need to be careful about division of responsibility here.
+
+31/1/2022
+
+Haven't changed the way the object clone behaviour works currently, but I moved read_object into an impl against TdmsMap that gets TdmsMap passed in manually rather than by self bit pointless really but it works and it's a LOT faster. Not sure if that's attributed to the change in algorithm to just do a vec push of a string (as an index into all_objects) rather than cloning objects everywhere, but channel load even for the big file is almost instant, still a fraction slower than Adam's though I think. Will go in and hack out the clones then look to make a commit.
+
++ Moved read_data_vector to be a pub function inside tdms_datatypes, tidied up call signature and call sites in TdmsFile
+
+Side note added ctrl+alt+i for inlay hint toggle in rust-analyzer
+
+Need to make sure my understanding of how chunk_size behaves/is computed when new objects are added to a segment with existing objects
+i.e. only the new objects appear in the meta data but the other objects have raw data.
+
+Confirm it's an ERROR to blindly add to live_objects on the arm where kTocNewObjList has not been set, a channel can appear again purely
+to report a change in the number of values, need to figure out how not to update the live_objects map if there's already something in it
+
++ Fixed error in update rules around the live_object list when kTocNewObjList has not been set, specifically checked if the object is already there i.e. it's not changing order, but some parameter is changing.
+
+Have introduced a crash on the kTocNewObjList arm when unwrapping, not sure how it's possible there's no object in the list.
+
++ Fixed the crash, but then I think I stopped it loading fast again. I think because it wasn't actually running the indexing calcs because of a previous error.

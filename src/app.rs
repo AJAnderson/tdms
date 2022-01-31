@@ -28,7 +28,7 @@ impl TemplateApp {
     fn open_dialog(&mut self) {
         if let Some(path) = FileDialog::new().pick_file() {
             let tdms_file = TdmsFile::open(&path).unwrap();
-            println!("{:?}", tdms_file.tdms_map.all_objects);
+            //println!("{:?}", tdms_file.tdms_map.all_objects);
             self.file_handle = Some(tdms_file)
         }
 
@@ -103,11 +103,9 @@ impl epi::App for TemplateApp {
 
             // If we have a chan_path then load it if we haven't already
             if let Some(chan_path) = self.selected_channel.clone() {
-                let result = self.file_handle.as_mut().unwrap().load_data(&chan_path);
-                println!("{:?}",result);
+                let result = self.file_handle.as_mut().unwrap().load_data(&chan_path);                
                 match result {
-                    Ok(data) => {
-                    println!("{:?}",data);
+                    Ok(data) => {                    
                     match &data {
                         DataTypeVec::Double(datavector) => {
                             let vecy = (0..datavector.len()).map(|i| {
