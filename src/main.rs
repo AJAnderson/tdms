@@ -1,12 +1,7 @@
 // #![warn(clippy::all)]
 use flexi_logger::{opt_format, Logger};
 mod tdms_error;
-// use charts::{Chart, LineSeriesView, MarkerType, PointDatum, ScaleLinear};
 use std::env;
-// use std::fs::File;
-// use std::io::Write;
-// use std::path;
-// use tdms_error::{TdmsError, TdmsErrorKind};
 use rstdms::TdmsError;
 
 mod app;
