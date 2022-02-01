@@ -79,9 +79,11 @@ impl TdmsFile {
     /// Open a Tdms file and initialize a buf rdr to handle access.
     pub fn open(path: &path::Path) -> Result<TdmsFile, TdmsError> {
         let fh = fs::File::open(path)?;
+        let file_length = fh.metadata().unwrap().len();
+        println!("file size on load: {:?}", file_length);
         let mut file_reader = io::BufReader::new(fh);
         let mut tdms_map = TdmsMap::new()?;
-        tdms_map.map_segments(&mut file_reader)?;
+        tdms_map.map_segments(&mut file_reader, file_length)?;
         
         Ok(TdmsFile{reader: file_reader,
             tdms_map: tdms_map})
@@ -152,23 +154,27 @@ impl TdmsMap {
 
     /// Walk the file attempting to load the segment meta data and objects.
     /// Raw data is not loaded during these reads in the interest of Lazy Loading
-    /// i.e. graceful handling of very large files.
-    fn map_segments<R: Read + Seek>(&mut self, reader: &mut R) -> Result<&mut Self, TdmsError> {
-        // TODO: The construction of this function isn't right, if segment address ever is
-        // 0xFFFF_FFFF then the file is malformed and this should probably be some kind of error.
-        let mut segment_address = 0;
-        while segment_address != 0xFFFF_FFFF {
+    /// i.e. memory efficienct handling of very large files.
+    fn map_segments<R: Read + Seek>(&mut self, reader: &mut R, file_length: u64) -> Result<&mut Self, TdmsError> {
+        println!("____MAP SEGMENT ENTRY____");
+        println!("File length confirm: {}", file_length);
+        
+        let mut next_segment_address = 0;
+        // If the file is corrupted, the last segment will contain 0xFFFF_FFFF for the "next segment offset". 
+        // In this case the reader will attempt to map the segment but will hit an Unexpected end of file error
+        // while doing so. 
+        while next_segment_address < file_length {
             // Try read in a segment, if an error is returned, intercept it if it's
             // unexpected EoF which indicates there's nothing at the target segment
             // address, or bubble it up if it's a different kind of error.
             debug!("=============NEW SEGMENT==============");
             
-            let segment = match self.read_segment(reader, segment_address) {
+            let segment = match self.read_segment(reader, next_segment_address) {
                 Ok(segment) => segment,
                 Err(err) => match &err.kind {
                     TdmsErrorKind::Io(e) => match e.kind() {
                         ErrorKind::UnexpectedEof => {
-                            println!("Completed read");
+                            println!("Completed read, final segment is corrupted");
                             return Ok(self);
                         }
                         // Any other io error, repackage it and send it on
@@ -176,17 +182,15 @@ impl TdmsMap {
                     },
                     _ => return Err(err), // Return early on weird custom errors as well
                 },
-            };
-
-            // TODO I think the early return for malformed segments could happen here?
-            // reverse the logical check and return if true (report an error?)
-            if segment.next_seg_offset != 0xFFFF_FFFF {
-                // note that next segment offset is the total number of bytes in the
-                // segment minus the lead in of 28 bytes, compute the next absolute index
-                segment_address = segment.next_seg_offset + segment_address + 28;
-            }
+            }; 
+            
+            let lead_in = 28; // length in bytes
+            next_segment_address = segment.next_seg_offset + next_segment_address + lead_in;
+            println!("absolute next seg address (after read): {:?}", next_segment_address);
+            
             self.segments.push(segment);
         }
+        println!("Completed read");
         Ok(self)
     }
 
@@ -220,6 +224,7 @@ impl TdmsMap {
         // Finish out the lead in
         segment.version_no = reader.read_u32::<O>()?;
         segment.next_seg_offset = reader.read_u64::<O>()?;
+        println!("segment offset: {:?}", segment.next_seg_offset);
         segment.raw_data_offset = reader.read_u64::<O>()?;
         debug!("version_no: {}", segment.version_no);
         debug!("next_seg_offset: {}", segment.next_seg_offset);

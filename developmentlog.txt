@@ -454,3 +454,31 @@ to handle 100k+ points in a graph. He suggests downsampling before feeding to th
 not the forming of Lines and Values which is at issue, but the tesselation and rendering itself which is slow.
 
 I can tidy that code up to load into the cache then displayed. Then can look at sub-sampling as well.
+
+1/2/2022
+
+Todo items ("MVP"):
+1) Drill into the iteration logic for segments and nail it down, handle early return for malformed segments
+2) interleaved data (new test file needed)
+3) understand and verify chunk size handling for channels which are added (new test file needed)
+4) refactor algorithm to avoid multiple passes over object list (related to chunk size handling)
+5) separate out algorithm concerns into functions, i.e. update index step
+6) Handle DAQmx data types
+7) Test cases for each data type (specifically need to verify things like time stamps)
+8) Test case for flexlogger
+
+Future state:
+9) Smart sub-sampling for speed (based on window size in pixels?)
+10) Box zoom
+11) Pretty up the channel interface (tick box to activate channels?)
+12) Speed comparison against Speedo
+
+Working on 1)
+Fixed it, simple as checking whether we're equal to file length, now properly handles file corruption (I think)
+
+
+
+Related to separating algorithm concerns, these are the inputs to the index computation step:
+meta_data (chunk_size, R-objecs)
+segment (R-next_seg_offset, R-raw_data_offset, W-no_chunks)
+TdmsMap (W-all_objects,
