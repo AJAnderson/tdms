@@ -16,11 +16,8 @@ pub enum TdmsErrorKind {
     NoPreviousObject,     // raw_data_index == 0, but no previous object available.
     StringSizeNotDefined, // size is called on TdmsString without first putting a guard in place.
     RawDataTypeNotFound,  // Can't convert from u32 to DataTypeRaw enum variant
-    NoMetaDataAvailable,  // An attempt was made to access segment metadata which doesn't exist
-    NoPreviousSegment, // An attempt was made to index the most recent segment but it does not exist
     ChannelNotFound,   // Couldn't load the requested data because it does not appear in the file
     ObjectHasNoRawData, // The object doesn't contain any raw data, may want to try just returning the properties.
-    ChannelDoesNotMatchDataType,
 }
 
 impl fmt::Display for TdmsError {
@@ -31,11 +28,9 @@ impl fmt::Display for TdmsError {
             TdmsErrorKind::NoPreviousObject => write!(f, "Raw data index was equal to zero indicating this object has appeared before, but no previous object was recorded. Data may be malformed")?, 
             TdmsErrorKind::StringSizeNotDefined => write!(f, "Calling size directly on a DataTypeRaw::TdmsString is not meaningful. A file read operation is required to either verify total size of string data in a segment, or perform a string read. To perform a string read use 'match_read_string'")?,
             TdmsErrorKind::RawDataTypeNotFound => write!(f, "The parsed u32 did not match a known raw data type")?,
-            TdmsErrorKind::NoMetaDataAvailable => write!(f, "An attempt was made to access segment metadata which doesn't exist")?,
-            TdmsErrorKind::NoPreviousSegment => write!(f, "An attempt was made to index the most recent segment but it does not exist")?,
             TdmsErrorKind::ChannelNotFound => write!(f, "The requested channel is not in the channel list, ensure special characters are correctly escaped")?,
             TdmsErrorKind::ObjectHasNoRawData => write!(f, "The requested object does not contain any raw data")?,
-            TdmsErrorKind::ChannelDoesNotMatchDataType =>  write!(f, "The datatype requested does not match the datatype of the channel")?,}
+        }
         Ok(())
     }
 }

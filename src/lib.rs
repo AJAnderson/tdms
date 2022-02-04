@@ -325,7 +325,7 @@ impl TdmsMap {
                 }
             }
 
-            // Iterate over the up to date live_objects list and compute new read maps
+            // meta_data chunk size calculation during read-in only accounted for new objects, recalculate
             let mut new_chunk_size = 0;
 
             // First we have to establish the correct chunk_size computation accounting for all live_objects
@@ -334,8 +334,7 @@ impl TdmsMap {
                 let object_map = self.all_objects.get(key).unwrap();
                 new_chunk_size += object_map.last_object.total_size;
             }
-
-            // meta_data chunk size only accounted for new objects, recalculate
+            
             meta_data.chunk_size += new_chunk_size;
 
             let no_chunks: u64 = if meta_data.chunk_size > 0 {
