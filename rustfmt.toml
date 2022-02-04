@@ -1,0 +1,4 @@
+max_width = 100
+chain_width = 60
+# wrap_comments = true
+# indent_style = "Visual"

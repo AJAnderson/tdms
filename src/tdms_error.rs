@@ -28,7 +28,7 @@ impl fmt::Display for TdmsError {
         match &self.kind {
             TdmsErrorKind::Io(e) => write!(f, "IO error: {}", e)?,
             TdmsErrorKind::FromUtf8(e) => write!(f, "unable to convert buffer to string: {}", e)?,
-            TdmsErrorKind::NoPreviousObject => write!(f, "Raw data index was equal to zero indicating this object has appeared before, but no previous object was available. Data may be malformed")?, 
+            TdmsErrorKind::NoPreviousObject => write!(f, "Raw data index was equal to zero indicating this object has appeared before, but no previous object was recorded. Data may be malformed")?, 
             TdmsErrorKind::StringSizeNotDefined => write!(f, "Calling size directly on a DataTypeRaw::TdmsString is not meaningful. A file read operation is required to either verify total size of string data in a segment, or perform a string read. To perform a string read use 'match_read_string'")?,
             TdmsErrorKind::RawDataTypeNotFound => write!(f, "The parsed u32 did not match a known raw data type")?,
             TdmsErrorKind::NoMetaDataAvailable => write!(f, "An attempt was made to access segment metadata which doesn't exist")?,

@@ -36,7 +36,7 @@ impl TemplateApp {
     }
 
     fn populate_channels(&mut self) {
-        for channel in self.file_handle.as_ref().expect("No chans").objects() {            
+        for channel in self.file_handle.as_ref().expect("No chans").objects() {
             self.channel_strings.push(channel.to_string());
         }
     }
@@ -45,7 +45,7 @@ impl TemplateApp {
 impl epi::App for TemplateApp {
     fn name(&self) -> &str {
         "TDMS Reader"
-    }    
+    }
 
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
@@ -53,7 +53,7 @@ impl epi::App for TemplateApp {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
             egui::menu::bar(ui, |ui| {
-                ui.menu_button( "File", |ui| {
+                ui.menu_button("File", |ui| {
                     if ui.button("Quit").clicked() {
                         frame.quit();
                     }
@@ -70,7 +70,7 @@ impl epi::App for TemplateApp {
                 if ui.button("Load File").clicked() {
                     self.open_dialog()
                 }
-                let scroll_area = ScrollArea::new([false,true]);
+                let scroll_area = ScrollArea::new([false, true]);
 
                 let (current_scroll, max_scroll) = scroll_area.show(ui, |ui| {
                     if self.channel_strings.len() > 0 {
@@ -82,13 +82,13 @@ impl epi::App for TemplateApp {
                                 ))
                                 .clicked()
                             {
-                                // copy in channel path (Todo: This could just be a reference to the vector index)                                
+                                // copy in channel path (Todo: This could just be a reference to the vector index)
                                 self.selected_channel = Some(channel.clone());
-                                let result = self.file_handle.as_mut().unwrap().load_data(&channel);                
+                                let result = self.file_handle.as_mut().unwrap().load_data(&channel);
                                 match result {
                                     Ok(data) => {
-                                    self.cached_data = Some(data.clone());
-                                    }, 
+                                        self.cached_data = Some(data.clone());
+                                    }
                                     _ => unimplemented!(),
                                 }
                             }
@@ -110,23 +110,23 @@ impl epi::App for TemplateApp {
 
             // If we have a chan_path then load it if we haven't already
 
-            if let Some(data) = self.cached_data.clone() {                        
+            if let Some(data) = self.cached_data.clone() {
                 match &data {
                     DataTypeVec::Double(datavector) => {
-                        let iter  = datavector.iter().step_by(10);
+                        let iter = datavector.iter().step_by(10);
                         let vecy = (0..iter.len()).zip(iter).map(|(i, val)| {
                             let x = i as f64;
                             Value::new(x, val.clone())
                         });
-                        
+
                         let line = Line::new(Values::from_values_iter(vecy.clone()));
-                        egui::plot::Plot::new("Channel").view_aspect(1.0).show(ui, |plot_ui| plot_ui.line(line));                              
+                        egui::plot::Plot::new("Channel")
+                            .view_aspect(1.0)
+                            .show(ui, |plot_ui| plot_ui.line(line));
                     }
                     _ => unimplemented!(),
                 };
-                    
             };
-
 
             // Display something
             // let sin = (0..1000).map(|i| {

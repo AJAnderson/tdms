@@ -1,11 +1,11 @@
-use std::iter::IntoIterator;
 use std::io::{Read, Seek, SeekFrom};
+use std::iter::IntoIterator;
 
 use crate::tdms_error::{TdmsError, TdmsErrorKind};
 use crate::TdmsMap;
+use byteorder::*;
 use num_derive::FromPrimitive;
 use num_enum::IntoPrimitive;
-use byteorder::*;
 
 #[derive(IntoPrimitive, Debug)]
 #[repr(u32)]
@@ -15,7 +15,7 @@ pub enum TocProperties {
     KTocDAQmxRawData = 1 << 7,    // segment contains DAQmx raw data
     KTocInterleavedData = 1 << 5, // raw data is interleaved (else continuous)
     KTocBigEndian = 1 << 6,       // all numeric values in segment are bigendian (including lead in)
-    KTocNewObjList = 1 << 2,      // first segment, or order has changed (is not present when channel is added)
+    KTocNewObjList = 1 << 2, // first segment, or order has changed (is not present when channel is added)
 }
 
 #[derive(Debug)]
@@ -64,8 +64,14 @@ pub enum DataTypeRaw {
 }
 
 impl DataTypeRaw {
-    /// Returns the size of the data type in bytes.
-    /// TODO: This should return an error but I'm not sure how to import the error module as it's in the same level of hierarchy. For now
+    /// Convert a raw u32 value into a DataTypeRaw enum
+    pub fn from_u32(raw_id: u32) -> Result<DataTypeRaw, TdmsError> {
+        num::FromPrimitive::from_u32(raw_id).ok_or(TdmsError {
+            kind: TdmsErrorKind::RawDataTypeNotFound,
+        })
+    }
+
+    /// Returns the size of the data type in bytes.    
     pub fn size(self) -> Result<u64, TdmsError> {
         match self {
             DataTypeRaw::Void => Ok(0),
@@ -137,7 +143,6 @@ pub enum DataType {
     TimeStamp(TdmsTimeStamp),
 }
 
-
 /// Helper function for reading string.
 pub fn read_string<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<String, TdmsError> {
     let str_len = reader.read_u32::<O>()?;
@@ -145,36 +150,39 @@ pub fn read_string<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<Strin
     let mut str_raw_buf = vec![0u8; str_len as usize];
     reader.read_exact(&mut str_raw_buf)?;
     Ok(String::from_utf8(str_raw_buf)?)
-}  
+}
 
 /// Reads data into the DataType enum based on the value of DataTypeRaw.
 /// The distinction exists because an enum can't have both a defined representation
 /// i.e. an integer value indicating which enum value it is, and a wrapped value
-pub fn read_datatype<R: Read + Seek, O: ByteOrder>(reader: &mut R, rawtype: DataTypeRaw) -> Result<DataType, TdmsError> {
+pub fn read_datatype<R: Read + Seek, O: ByteOrder>(
+    reader: &mut R,
+    rawtype: DataTypeRaw,
+) -> Result<DataType, TdmsError> {
     let dataout = match rawtype {
-            DataTypeRaw::TdmsString => DataType::TdmsString(read_string::<R, O>(reader)?),
-            DataTypeRaw::U8 => DataType::U8(reader.read_u8()?),
-            DataTypeRaw::U16 => DataType::U16(reader.read_u16::<O>()?),
-            DataTypeRaw::U32 => DataType::U32(reader.read_u32::<O>()?),
-            DataTypeRaw::U64 => DataType::U64(reader.read_u64::<O>()?),
-            DataTypeRaw::I8 => DataType::I8(reader.read_i8()?),
-            DataTypeRaw::I16 => DataType::I16(reader.read_i16::<O>()?),
-            DataTypeRaw::I32 => DataType::I32(reader.read_i32::<O>()?),
-            DataTypeRaw::I64 => DataType::I64(reader.read_i64::<O>()?),
-            DataTypeRaw::SingleFloat => DataType::Float(reader.read_f32::<O>()?),
-            DataTypeRaw::DoubleFloat => DataType::Double(reader.read_f64::<O>()?),
-            DataTypeRaw::Boolean => DataType::Boolean(match reader.read_u8()? {
-                                            0 => false,
-                                            _ => true,
-                                        }),                     
-            DataTypeRaw::TimeStamp => {
-                let epoch = reader.read_i64::<O>()?;
-                let radix = reader.read_u64::<O>()?;
-                DataType::TimeStamp(TdmsTimeStamp { epoch, radix })
-            }
-            _ => DataType::Void(()), // TODO this is a dirty placeholder
-            };          
-    
+        DataTypeRaw::TdmsString => DataType::TdmsString(read_string::<R, O>(reader)?),
+        DataTypeRaw::U8 => DataType::U8(reader.read_u8()?),
+        DataTypeRaw::U16 => DataType::U16(reader.read_u16::<O>()?),
+        DataTypeRaw::U32 => DataType::U32(reader.read_u32::<O>()?),
+        DataTypeRaw::U64 => DataType::U64(reader.read_u64::<O>()?),
+        DataTypeRaw::I8 => DataType::I8(reader.read_i8()?),
+        DataTypeRaw::I16 => DataType::I16(reader.read_i16::<O>()?),
+        DataTypeRaw::I32 => DataType::I32(reader.read_i32::<O>()?),
+        DataTypeRaw::I64 => DataType::I64(reader.read_i64::<O>()?),
+        DataTypeRaw::SingleFloat => DataType::Float(reader.read_f32::<O>()?),
+        DataTypeRaw::DoubleFloat => DataType::Double(reader.read_f64::<O>()?),
+        DataTypeRaw::Boolean => DataType::Boolean(match reader.read_u8()? {
+            0 => false,
+            _ => true,
+        }),
+        DataTypeRaw::TimeStamp => {
+            let epoch = reader.read_i64::<O>()?;
+            let radix = reader.read_u64::<O>()?;
+            DataType::TimeStamp(TdmsTimeStamp { epoch, radix })
+        }
+        _ => DataType::Void(()), // TODO this is a dirty placeholder
+    };
+
     Ok(dataout)
 }
 
@@ -185,8 +193,8 @@ pub fn read_datatype<R: Read + Seek, O: ByteOrder>(reader: &mut R, rawtype: Data
 /// See TdmsFileHandle::read_data_vector for the point of implementation
 #[derive(Debug, Clone)]
 pub enum DataTypeVec {
-    Void(Vec<()>),      // Should nuke this somehow
-    Boolean(Vec<bool>), // nptdms uses 1 byte, I'm not sure this is correct as LV internal representation is 32 bits for a bool
+    Void(Vec<()>), // Should nuke this somehow
+    Boolean(Vec<bool>),
     I8(Vec<i8>),
     I16(Vec<i16>),
     I32(Vec<i32>),
