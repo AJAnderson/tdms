@@ -509,3 +509,86 @@ TdmsMap (W-all_objects,
 Actually, it's so interwoven and stable, I don't think it's worth my time to separate as a priority.
 
 Lets get DAQmx on board.
+
+Implemented DAQmx read for format changing scaler, not sure how digital line scaler differs so I'm just copying the same implementation until some error manifests to show otherwise. I'm guessing it might be in what properties are recorded.
+
+6/2/2022
+
+Have a go at sorting interleaved out
+
+rebuilt with new version of byteorder
+
++ Corrected incorrect implementation of vector reading for i8 and u8
+
+In trying to condense the read vector implementation, I wonder if I can use Adam's trick of creating a trait that extends ByteOrder or maybe ReadBytesExt, goal being to dispatch to a function from ReadBytesExt on the fly, no idea if this would work though.
+
+Thinking it over some more, I can't imagine how this would work without ending up as an enum dispatch to a reader anyway
+
+7/2/2022
+
+Asked again but am prepared to abandon mucking around with the effort to condense read_vector via generecism. Thinking about it further, I think you just end up implementing Adam's solution.
+
++ Minor tidy up to remove the responsibility of searching for an object outside read_vector
+
+For interleaved data, I think it needs to be tracked per read-pair as a proxy for per-segment.
+
+9/2/2022
+
+Currently a read pair start_index is the asbolute index of a block of data. With interleaved, start_index would point to the first byte in the chunk? -> So would already have the offset baked in i.e. raw_data start index + SUM(datatype size), objects preceeding this one. Stride would just be the sum of all object datatype sizes for the objects in the segment?
+
+Have introdued stride to the readmap, now need to implement actually updating it, then using it in the read_vector algorithm
+
+10/2/2022
+
+No idea how strings interleave, do they carry their size info at the start of each string?
+
+Flow stopped at updating the channel_width thingy in the arm where we're updating the live_objects list rather than dealing with a whole new set of objects.
+
+12/2/2022
+
+Ok, I think I've handled the read in such that read pairs now carry an Option(stride) and an interleaved flag.
+
+Compile finished, lets see if it still works. No, panic on unwrap on Err "No Previous Object". trying to load in.
+
+It's coming from the code I added to handle when index_info_len == 0 which is meant to indicate "same data layout as previous segment".
+
+Instrumenting with prinln!
+object path: /'Group2'/'DoubleRampArray'
+Map object: /'Group2'/'DoubleWavRamp'
+Map object: /'Group2'/'I32WavRamp'
+Map object: /'Group2'/'DoubleAttrWavRamp'
+
+So how has DoubleRampArray come to be a new object without any raw data that is also somehow logging that it previously had data?
+
+Signal express file loads fine but am getting a bunch of weird behaviour which I think is unrelated stuff I haven't fixed yet, specifically clicking the high level group paths causes the app to crash out. That's just a todo. 
+
+Actually going to fix that now, eliminate channels that don't have raw data.
+
+Change the API, an "all_objects" function and a "objects_with_data" function.
+
+Ok done, that tidied up the list, but now only the decimated data levels 1 and 2 load, the all_data level has an indexing problem. There's an accounting issue with the computation of total_bytes. Or there's actually an issue with the data possibly.
+
+Or possibly the no_bytes in the read pairs is incorrect.
+
+Ok, looks like in the first segment there are 3 chunks? it iterates to create 3 read pairs, but it only adds one chunk worth of bytes to the total_bytes count.
+
+It seems object.total_size is not tracking the accumulation of size across chunks. If it's a mishandling of the info at the update_read_object level I can't see it.
+
+Either the meta-data computation should do this, or the actual read_pairs computation should
+
+read_pairs computation decided but the code is getting a bit out of control, I am going to try and condense out the update indexes functions so that they're consistent.
+
+Rough thoughts, make it align with the new objects process, then shape the inputs to it in the existing objects process
+
+Side fix, replaced a spurious for loop with if let Some -> builds
+
+Now attempting to generalize update_indexes
+
+I've implemented it by passing in a mutable relative_position and updating it inside the function. Feels a little more black magic than I would like.
+
+I aligned on the new objects approach to updating indexes, but it seems the existing objects might be better. It takes advantage
+of the fact that the object has already been loaded into the all_objects map. Yeah, that caseis currently written in a more general fashion. Pivoting update_indexes to work the same way.
+
+Due to a mutable borrow over immutable borrow issue with the structs had to rewrite the update_indexes to be an independent function that takes the indexmap as input directly.
+
+I think I can also strip the guard for meta_data.chunk_size being >0 but will compile here as it's a fairly big milestone.

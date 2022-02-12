@@ -36,7 +36,7 @@ impl TemplateApp {
     }
 
     fn populate_channels(&mut self) {
-        for channel in self.file_handle.as_ref().expect("No chans").objects() {
+        for channel in self.file_handle.as_ref().expect("No chans").data_objects() {
             self.channel_strings.push(channel.to_string());
         }
     }

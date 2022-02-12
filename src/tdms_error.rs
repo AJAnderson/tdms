@@ -16,7 +16,7 @@ pub enum TdmsErrorKind {
     NoPreviousObject,     // raw_data_index == 0, but no previous object available.
     StringSizeNotDefined, // size is called on TdmsString without first putting a guard in place.
     RawDataTypeNotFound,  // Can't convert from u32 to DataTypeRaw enum variant
-    ChannelNotFound,   // Couldn't load the requested data because it does not appear in the file
+    ChannelNotFound,      // Couldn't load the requested data because it does not appear in the file
     ObjectHasNoRawData, // The object doesn't contain any raw data, may want to try just returning the properties.
 }
 

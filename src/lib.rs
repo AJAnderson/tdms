@@ -28,10 +28,16 @@ Root Object
 */
 
 #[derive(Debug, Clone)]
-/// ReadPairs give the absolute file index, and the #no of bytes to read at that index, a channel is accessed by a vector of ReadPairs
+/// ReadPairs give the absolute file index, and the #no of bytes to read at that index, a channel
+/// is accessed by a vector of ReadPairs, the length of which should correspond to the number of
+/// raw data chunks in the file in which the channel is present.
 pub struct ReadPair {
     start_index: u64,
     no_bytes: u64,
+    interleaved: bool,
+    /// This is the sum of the datatype sizes for all channels in the chunk i.e. the number of bytes till
+    /// the next value of this channel in interleaved data. Only present if interleaved is true.
+    stride: Option<u64>,
 }
 
 impl fmt::Display for ReadPair {
@@ -96,39 +102,38 @@ impl TdmsFile {
         })
     }
 
-    // Result<Vec<u64>, TdmsError>
     /// Stub implementation of load functionality, currently up to trying to get vector loading working gracefully
     pub fn load_data(&mut self, path: &str) -> Result<DataTypeVec, TdmsError> {
         // check if object exists in map
-        if self
-            .tdms_map
-            .all_objects
-            .get(path)
-            .ok_or(TdmsError {
-                kind: TdmsErrorKind::ChannelNotFound,
-            })?
-            .bigendian
-        {
-            Ok(read_data_vector::<_, BE>(
-                &mut self.tdms_map,
-                &mut self.reader,
-                path,
-            )?)
+
+        let object_map = self.tdms_map.all_objects.get(path).ok_or(TdmsError {
+            kind: TdmsErrorKind::ChannelNotFound,
+        })?;
+        if object_map.bigendian {
+            Ok(read_data_vector::<_, BE>(object_map, &mut self.reader)?)
         } else {
-            Ok(read_data_vector::<_, LE>(
-                &mut self.tdms_map,
-                &mut self.reader,
-                path,
-            )?)
+            Ok(read_data_vector::<_, LE>(object_map, &mut self.reader)?)
         }
     }
 
-    /// Return a vector of channel paths
-    pub fn objects(&self) -> Vec<&str> {
+    /// Return a vector of object paths
+    pub fn all_objects(&self) -> Vec<&str> {
         let mut objects: Vec<&str> = Vec::new();
 
         for key in self.tdms_map.all_objects.keys() {
             objects.push(key)
+        }
+        objects
+    }
+
+    /// Return a vector of channel paths for channels with data
+    pub fn data_objects(&self) -> Vec<&str> {
+        let mut objects: Vec<&str> = Vec::new();
+
+        for (key, object_map) in &self.tdms_map.all_objects {
+            if object_map.last_object.total_size > 0 {
+                objects.push(key);
+            }
         }
         objects
     }
@@ -249,6 +254,7 @@ impl TdmsMap {
         reader: &mut R,
         mut segment: TdmsSegment,
     ) -> Result<TdmsSegment, TdmsError> {
+        println!("_______ENTERING SEGMENT________");
         // Finish out the lead in
         segment.version_no = reader.read_u32::<O>()?;
         segment.next_seg_offset = reader.read_u64::<O>()?;
@@ -260,82 +266,56 @@ impl TdmsMap {
         // Update the object maps
         // TODO: This still does not handle interleaved data at all
         if segment.toc_mask.has_flag(TocProperties::KTocNewObjList) {
+            // create new map of objects
+            let mut new_map: Vec<String> = Vec::new();            
+            for object in meta_data.objects.iter() {                
+                new_map.push(object.object_path.clone());
+            }            
+            self.live_objects = new_map;
+
             // if new_obj list has been set, then the chunk size as reported by new metadata is
             // everything and we could have a totally new ordering of data for this segment.
             // This will reset the live_objects map
-            let no_chunks: u64 = if meta_data.chunk_size > 0 {
+            segment.no_chunks = if meta_data.chunk_size > 0 {
                 (segment.next_seg_offset - segment.raw_data_offset) / meta_data.chunk_size
             } else {
                 0
             };
 
-            segment.no_chunks = no_chunks;
-
-            // create new map of objects
-            let mut new_map: Vec<String> = Vec::new();
-
-            let mut relative_position: u64 = 0; // Used in computing read pairs as we go
-            for object in meta_data.objects.iter() {
-                //compute read pairs as we go to save double iteration over the objects map, only compute if size here is > 0
-                let mut new_read_map: Vec<ReadPair> = Vec::new();
-                if object.total_size > 0 {
-                    for i in 0..no_chunks {
-                        let pair = ReadPair {
-                            start_index: segment.start_index
-                                + 28
-                                + segment.raw_data_offset
-                                + i * meta_data.chunk_size
-                                + relative_position,
-                            no_bytes: object.total_size,
-                        };
-                        new_read_map.push(pair);
-                    }
-                }
-
-                // update the object map
-                let mut object_map = self.all_objects.get_mut(&object.object_path).unwrap();
-                object_map.read_map.append(&mut new_read_map);
-                object_map.total_bytes += object.total_size;
-                object_map.bigendian = segment.toc_mask.has_flag(TocProperties::KTocBigEndian);
-
-                relative_position += object.total_size;
-
-                // Push the object path to the live_objects replacement
-                new_map.push(object.object_path.clone());
-            }
-
-            // At this point all objects are into a map in their correct order,
-            // update the live_objects map for future use.
-            self.live_objects = new_map;
+            self.update_indexes(&segment, &meta_data)?;
+            
         } else {
             // Need to iterate over the new list of objects in the segment, this list should only contain newly added objects
             // check if it's in all_objects and update, otherwise update live objects
             for object in meta_data.objects.iter() {
-                // Check if it's in the all_objects map and update otherwise insert (presumably at end)
-                let mut existing_obj_map = self.all_objects.get_mut(&object.object_path).unwrap();
-                existing_obj_map.bigendian =
-                    segment.toc_mask.has_flag(TocProperties::KTocBigEndian);
-
                 // If the object isn't in the live objects then it is truly new, so push it. If it is there
                 // then something about the object has changed but its order is still correct.
                 if !self.live_objects.contains(&object.object_path) {
                     self.live_objects.push(object.object_path.clone());
-                    // previously unseen object, update size in map
-                    existing_obj_map.total_bytes += object.total_size;
                 }
             }
 
-            // meta_data chunk size calculation during read-in only accounted for new objects, recalculate
+            // meta_data chunk size calculation during read-in only accounted for new objects,
+            // recalculate
             let mut new_chunk_size = 0;
+            let mut new_channels_size = 0;
 
-            // First we have to establish the correct chunk_size computation accounting for all live_objects
-            for key in self.live_objects.iter() {
-                // We know here that all_objects always has an entry for anything in the live_objects list, so unwrap is safe.
+            // First we have to establish the correct chunk_size and channels_size computation 
+            // accounting for all live_objects
+            for key in self.live_objects.iter() {                
                 let object_map = self.all_objects.get(key).unwrap();
                 new_chunk_size += object_map.last_object.total_size;
+                if let Some(raw_type) = object_map.last_object.raw_data_type {
+                    new_channels_size += match raw_type {
+                        // TODO no idea if this is correct i.e. how strings interleave
+                        DataTypeRaw::TdmsString => object_map.last_object.total_size, 
+                        other => other.size()?,
+                    };
+                };
             }
-            
+
             meta_data.chunk_size += new_chunk_size;
+            meta_data.channels_size += new_channels_size;
 
             let no_chunks: u64 = if meta_data.chunk_size > 0 {
                 (segment.next_seg_offset - segment.raw_data_offset) / meta_data.chunk_size
@@ -345,33 +325,77 @@ impl TdmsMap {
 
             segment.no_chunks = no_chunks;
 
-            // Now we can go over it again and calculate the new read_map points for the segment
-            // TODO (Distant future): There must be a way to stop going over and over the list of objects.
-            let mut relative_position: u64 = 0; // Used in computing read pairs as we go
-            for key in self.live_objects.iter() {
-                for object_map in self.all_objects.get_mut(key) {
-                    // add the new read_pair, only compute if size here is > 0
-                    if object_map.last_object.total_size > 0 {
-                        for i in 0..no_chunks {
-                            let pair = ReadPair {
-                                start_index: segment.start_index
-                                    + 28
-                                    + segment.raw_data_offset
-                                    + i * meta_data.chunk_size
-                                    + relative_position,
-                                no_bytes: object_map.last_object.total_size,
-                            };
-                            object_map.read_map.push(pair);
-                        }
-                    }
-                    relative_position += object_map.last_object.total_size;
-                }
-            }
+            // Now we can go over it again and calculate the new read_map points for the segment 
+            self.update_indexes(&segment, &meta_data)?;
+
         }
 
         Ok(segment)
+    }   
+    
+    fn update_indexes(
+        &mut self,
+        segment: &TdmsSegment,
+        meta_data: &TdmsMetaData,
+    ) -> Result<(), TdmsError> {
+        let mut relative_position: u64 = 0; // Used in computing read pairs as we go
+        for key in self.live_objects.iter() {
+            let object_map = self.all_objects.get_mut(key).unwrap();
+            let type_size = if let Some(raw_type) = object_map.last_object.raw_data_type {
+                match raw_type {
+                    // TODO no idea if this is correct i.e. how strings interleave
+                    DataTypeRaw::TdmsString => object_map.last_object.total_size,
+                    other => other.size()?,
+                }
+            } else {
+                0
+            };
+    
+            //compute read pairs as we go to save double iteration over the objects map,
+            // only compute if size here is > 0
+    
+            let mut accumulating_obj_size: u64 = 0;
+            if object_map.last_object.total_size > 0 {
+                for i in 0..segment.no_chunks {
+                    let pair = ReadPair {
+                        start_index: segment.start_index
+                            + 28
+                            + segment.raw_data_offset
+                            + i * meta_data.chunk_size
+                            + relative_position,
+                        no_bytes: object_map.last_object.total_size,
+                        interleaved: segment
+                            .toc_mask
+                            .has_flag(TocProperties::KTocInterleavedData),
+                        stride: Some(meta_data.channels_size - type_size),
+                    };
+                    
+                    object_map.read_map.push(pair);
+                    accumulating_obj_size += object_map.last_object.total_size;
+                }
+            };
+            
+            object_map.total_bytes += accumulating_obj_size;
+            object_map.bigendian = segment.toc_mask.has_flag(TocProperties::KTocBigEndian);
+    
+            // If interleaved then the start position depends on the item sizes, if continuous
+            // then it's the number of values x type size i.e. "total_size"
+            if segment
+                .toc_mask
+                .has_flag(TocProperties::KTocInterleavedData)
+            {
+                relative_position += type_size;
+            } else {
+                relative_position += object_map.last_object.total_size;
+            }
+        }
+    
+        Ok(())
     }
+
 }
+
+
 
 /// A TdmsSegment consists of a 28 byte lead in followed by a series of optional MetaData
 /// properties. This is followed in turn by raw data if it exists.
@@ -423,6 +447,8 @@ pub struct TdmsMetaData {
     // figure out how many blocks of channel data there are in any given
     // segment
     chunk_size: u64,
+    /// The total byte size of each channels data type size
+    channels_size: u64,
 }
 
 impl fmt::Display for TdmsMetaData {
@@ -451,6 +477,7 @@ impl TdmsMetaData {
         let no_objects = reader.read_u32::<O>()?;
 
         let mut chunk_size: u64 = 0;
+        let mut channels_size: u64 = 0;
         let mut objects: Vec<TdmsObject> = Vec::new();
 
         for _i in 0..no_objects {
@@ -459,6 +486,13 @@ impl TdmsMetaData {
             // Keep track of the accumulating raw data size for objects
             chunk_size += obj.total_size;
 
+            if let Some(raw_type) = obj.raw_data_type {
+                channels_size += match raw_type {
+                    DataTypeRaw::TdmsString => obj.total_size, // TODO no idea if this is correct i.e. how strings interleave
+                    other => other.size()?,
+                };
+            };
+
             objects.push(obj);
         }
 
@@ -466,6 +500,7 @@ impl TdmsMetaData {
             no_objects,
             objects,
             chunk_size,
+            channels_size,
         })
     }
 }
@@ -479,7 +514,38 @@ pub struct TdmsObject {
     no_raw_vals: Option<u64>,
     total_size: u64, // of raw data in bytes, appears in file for variable length types (String) only. comptued otherwise
     no_properties: u32,
+    daqmx_info: Option<DAQMxInfo>,
     properties: IndexMap<String, ObjectProperty>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DAQMxInfo {
+    formatvec_size: u32,
+    scalers: Vec<DAQMxScaler>,
+    widthvec_size: u32,
+    widthvec: Vec<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DAQMxScaler {
+    daqmx_data_type: DataTypeRaw,
+    daqmx_rawbuff_indx: u32,
+    daqmx_raw_byte_offset: u32,
+    sample_format_bitmap: u32,
+    scale_id: u32,
+}
+
+impl DAQMxScaler {
+    pub fn new<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<DAQMxScaler, TdmsError> {
+        let scaler = DAQMxScaler {
+            daqmx_data_type: DataTypeRaw::from_u32(reader.read_u32::<O>()?)?,
+            daqmx_rawbuff_indx: reader.read_u32::<O>()?,
+            daqmx_raw_byte_offset: reader.read_u32::<O>()?,
+            sample_format_bitmap: reader.read_u32::<O>()?,
+            scale_id: reader.read_u32::<O>()?,
+        };
+        Ok(scaler)
+    }
 }
 
 impl Default for TdmsObject {
@@ -492,6 +558,7 @@ impl Default for TdmsObject {
             no_raw_vals: None,
             total_size: 0,
             no_properties: 0,
+            daqmx_info: None,
             properties: IndexMap::new(),
         }
     }
@@ -517,7 +584,8 @@ impl fmt::Display for TdmsObject {
 }
 
 impl TdmsObject {
-    /// Read an object from file including its properties    
+    /// Read an object from file including its properties, update the object's information
+    /// in the all_objects map.
     pub fn update_read_object<R: Read + Seek, O: ByteOrder>(
         tdms_map: &mut TdmsMap,
         reader: &mut R,
@@ -535,74 +603,95 @@ impl TdmsObject {
 
         new_object.index_info_len = reader.read_u32::<O>()?;
 
-        // TODO: Need to handle DAQmx data types here.
-
         if new_object.index_info_len == 0xFFFF_FFFF {
             // No raw data in this object
-            // check what properties exist or have changed
             new_object.update_properties::<R, O>(reader)?;
 
             // TODO this clone is here (this function returns anything at all) to keep working with the prior algorithms for updating
             // data indices
-            Ok(new_object.clone())            
+            Ok(new_object.clone())
         } else if new_object.index_info_len == 0 {
             // raw data index for this object should be identical to previous segments.
+            println!("object path: {}", new_object.object_path);
+            for live in &tdms_map.live_objects {
+                println!("Map object: {}", live);
+            }
             if !tdms_map.live_objects.contains(&new_object.object_path) {
                 Err(TdmsError {
                     kind: TdmsErrorKind::NoPreviousObject,
                 })
             } else {
-                // check what properties exist or have changed
                 new_object.update_properties::<R, O>(reader)?;
-
-                // TODO this clone is here (this function returns anything at all) to keep working with the prior algorithms for updating
-                // data indices
                 Ok(new_object.clone())
-            }           
+            }
         } else if new_object.index_info_len == 0x6912_0000 {
             // DAQmx with format changing scaler.
-
-            // Property update is disabled as without correct read sequence for DAQmx it will read in the wrong place
-            // new_object.update_properties::<R, O>(reader)?;
-
-            // TODO this clone is here (this function returns anything at all) to keep working with the prior algorithms for updating
-            // data indices
+            new_object.read_sizeinfo::<R, O>(reader)?;
+            new_object.read_daqmxinfo::<R, O>(reader)?;
+            new_object.update_properties::<R, O>(reader)?;
             Ok(new_object.clone())
-
         } else if new_object.index_info_len == 0x6913_0000 {
             // DAQmx with digital line scaler
-
-            // Property update is disabled as without correct read sequence for DAQmx it will read in the wrong place
-            // new_object.update_properties::<R, O>(reader)?;
-
-            // TODO this clone is here (this function returns anything at all) to keep working with the prior algorithms for updating
-            // data indices
+            new_object.read_sizeinfo::<R, O>(reader)?;
+            new_object.read_daqmxinfo::<R, O>(reader)?;
+            new_object.update_properties::<R, O>(reader)?;
             Ok(new_object.clone())
         } else {
             // This is a fresh, non DAQmx object, or amount of data has changed
-            let raw_data_type = DataTypeRaw::from_u32(reader.read_u32::<O>()?)?;
-            let dim = reader.read_u32::<O>()?;
-            let no_vals = reader.read_u64::<O>()?;
-
-            // total_size (bytes) is either recorded in the file if data is TdmsString or else
-            // must be computed. Size() will return an error if called on DataTypeRaw::TdmsString
-            // which is why there is a guard clause here.
-            let total_size = match raw_data_type {
-                DataTypeRaw::TdmsString => reader.read_u64::<O>()?,
-                other => other.size()? * no_vals * dim as u64,
-            };
-            new_object.raw_data_type = Some(raw_data_type);
-            new_object.raw_data_dim = Some(dim);
-            new_object.no_raw_vals = Some(no_vals);
-            new_object.total_size = total_size;
-
-            // check what properties exist or have changed
+            new_object.read_sizeinfo::<R, O>(reader)?;
             new_object.update_properties::<R, O>(reader)?;
-
-            // TODO this clone is here (this function returns anything at all) to keep working with the prior algorithms for updating
-            // data indices
             Ok(new_object.clone())
         }
+    }
+
+    fn read_sizeinfo<R: Read + Seek, O: ByteOrder>(
+        &mut self,
+        reader: &mut R,
+    ) -> Result<&mut Self, TdmsError> {
+        let raw_data_type = DataTypeRaw::from_u32(reader.read_u32::<O>()?)?;
+        let dim = reader.read_u32::<O>()?;
+        let no_vals = reader.read_u64::<O>()?;
+
+        // total_size (bytes) is either recorded in the file if data is TdmsString or else
+        // must be computed. Size() will return an error if called on DataTypeRaw::TdmsString
+        // which is why there is a guard clause here.
+        self.total_size = match raw_data_type {
+            DataTypeRaw::TdmsString => reader.read_u64::<O>()?,
+            other => other.size()? * no_vals * dim as u64,
+        };
+        self.raw_data_type = Some(raw_data_type);
+        self.raw_data_dim = Some(dim);
+        self.no_raw_vals = Some(no_vals);
+
+        Ok(self)
+    }
+
+    fn read_daqmxinfo<R: Read + Seek, O: ByteOrder>(
+        &mut self,
+        reader: &mut R,
+    ) -> Result<&mut Self, TdmsError> {
+        let daqmx_formatvec_size = reader.read_u32::<O>()?;
+
+        let mut scalers: Vec<DAQMxScaler> = Vec::new();
+        for _i in 0..daqmx_formatvec_size {
+            let scaler = DAQMxScaler::new::<R, O>(reader)?;
+            scalers.push(scaler);
+        }
+
+        let daqmx_datawidthvec_size = reader.read_u32::<O>()?;
+        let mut daqmx_data_width_vec = Vec::with_capacity(daqmx_datawidthvec_size as usize);
+        for _i in 0..daqmx_datawidthvec_size {
+            daqmx_data_width_vec.push(reader.read_u32::<O>()?);
+        }
+
+        self.daqmx_info = Some(DAQMxInfo {
+            formatvec_size: daqmx_formatvec_size,
+            scalers: scalers,
+            widthvec_size: daqmx_datawidthvec_size,
+            widthvec: daqmx_data_width_vec,
+        });
+
+        Ok(self)
     }
 
     /// Read the object properties, update if that property already exists for that object

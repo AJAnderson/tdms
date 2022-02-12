@@ -2,7 +2,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::iter::IntoIterator;
 
 use crate::tdms_error::{TdmsError, TdmsErrorKind};
-use crate::TdmsMap;
+use crate::{ObjectMap, ReadPair, TdmsMap};
 use byteorder::*;
 use num_derive::FromPrimitive;
 use num_enum::IntoPrimitive;
@@ -72,7 +72,7 @@ impl DataTypeRaw {
     }
 
     /// Returns the size of the data type in bytes.    
-    pub fn size(self) -> Result<u64, TdmsError> {
+    pub fn size(&self) -> Result<u64, TdmsError> {
         match self {
             DataTypeRaw::Void => Ok(0),
             DataTypeRaw::I8 => Ok(1),
@@ -218,27 +218,25 @@ pub enum DataTypeVec {
 
 /// Reads an array of the same type of data into a vector. It's designed to be used
 /// after a complete map of the read operations has been compiled via the map_segments function
-/// 
-/// IMPORTANT NOTE: Due to the default buffer size of BufRdr (8kb) it might not be more
-/// efficient to try and lazy load channels in the long run, as repeated seek operations at 
-/// the file system level must be performed if data is spaced more than 8kb's apart.
 ///
-/// QUESTION: Is there a better way to make a generic read operation than matching on
-/// everything all the time? It feels extremely wasteful.
-// TODO: Needs MAJOR work
-#[rustfmt::skip]
-pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(tdms_map: &mut TdmsMap, reader: &mut R, path: &str) -> Result<DataTypeVec, TdmsError> {
-    let object_map = tdms_map.all_objects.get(path).ok_or(TdmsError { kind: TdmsErrorKind::ChannelNotFound})?;
+/// IMPORTANT NOTE: Due to the default buffer size of BufRdr (8kb) it might not be more
+/// efficient to try and lazy load channels in the long run, as repeated seek operations at
+/// the file system level must be performed if data is spaced more than 8kb's apart.
+pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(
+    object_map: &ObjectMap,
+    reader: &mut R,
+) -> Result<DataTypeVec, TdmsError> {
     let read_pairs = &object_map.read_map;
-    let rawtype = &object_map.last_object.raw_data_type.ok_or(TdmsError {kind: TdmsErrorKind::ObjectHasNoRawData})?;
-    let total_bytes = &object_map.total_bytes;       
-    
+    let rawtype = &object_map.last_object.raw_data_type.ok_or(TdmsError {
+        kind: TdmsErrorKind::ObjectHasNoRawData,
+    })?;
+    let total_bytes = &object_map.total_bytes;
 
     let datavec: DataTypeVec = match rawtype {
         DataTypeRaw::Boolean => {
             let mut datavec: Vec<bool> = Vec::new();
             for pair in read_pairs {
-                reader.seek(SeekFrom::Start(pair.start_index))?; 
+                reader.seek(SeekFrom::Start(pair.start_index))?;
                 datavec.push(match reader.read_u8()? {
                     0 => false,
                     _ => true,
@@ -247,119 +245,133 @@ pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(tdms_map: &mut TdmsMap, re
             DataTypeVec::Boolean(datavec)
         }
         DataTypeRaw::I8 => {
-            let mut datavec: Vec<i8> = Vec::new();
+            let mut datavec: Vec<i8> = vec![0; *total_bytes as usize];
+            let mut i: usize = 0; // dummy variable to track bytes for indexing
             for pair in read_pairs {
-                reader.seek(SeekFrom::Start(pair.start_index))?;                    
-                datavec.push(reader.read_i8()?);
+                reader.seek(SeekFrom::Start(pair.start_index))?;
+                let no_values = pair.no_bytes as usize;
+                reader.read_i8_into(&mut datavec[i..i + no_values])?;
+                i += no_values;
             }
             DataTypeVec::I8(datavec)
         }
-        DataTypeRaw::I16 => {  
-            let mut datavec: Vec<i16> = vec![0; (total_bytes/2) as usize];
-            let mut i: usize = 0; // dummy variable to track bytes for indexing               
-            for pair in read_pairs {                     
+        DataTypeRaw::I16 => {
+            let mut datavec: Vec<i16> = vec![0; (total_bytes / 2) as usize];
+            let mut i: usize = 0; // dummy variable to track bytes for indexing
+            for pair in read_pairs {
                 reader.seek(SeekFrom::Start(pair.start_index))?;
-                let no_values = pair.no_bytes as usize / 2 ;
-                reader.read_i16_into::<O>(&mut datavec[i..i+no_values])?;
-                i += no_values;                                      
+                let no_values = pair.no_bytes as usize / 2;
+
+                if pair.interleaved {
+                    for j in 0..no_values {
+                        reader.read_i16_into::<O>(&mut datavec[i + j..i + j + 1])?;
+                        // exclusive range, to make sure compiler sees slice datatype
+                    }
+                } else {
+                    reader.read_i16_into::<O>(&mut datavec[i..i + no_values])?;
+                }
+                i += no_values;
             }
             DataTypeVec::I16(datavec)
         }
-        DataTypeRaw::I32 => {  
-            let mut datavec: Vec<i32> = vec![0; (total_bytes/4) as usize];
-            let mut i: usize = 0; // dummy variable to track bytes for indexing               
-            for pair in read_pairs {                     
+        DataTypeRaw::I32 => {
+            let mut datavec: Vec<i32> = vec![0; (total_bytes / 4) as usize];
+            let mut i: usize = 0; // dummy variable to track bytes for indexing
+            for pair in read_pairs {
                 reader.seek(SeekFrom::Start(pair.start_index))?;
-                let no_values = pair.no_bytes as usize / 4 ;
-                reader.read_i32_into::<O>(&mut datavec[i..i+no_values])?;
-                i += no_values;                                      
+                let no_values = pair.no_bytes as usize / 4;
+                reader.read_i32_into::<O>(&mut datavec[i..i + no_values])?;
+                i += no_values;
             }
             DataTypeVec::I32(datavec)
         }
-        DataTypeRaw::I64 => {  
-            let mut datavec: Vec<i64> = vec![0; (total_bytes/8) as usize];
-            let mut i: usize = 0; // dummy variable to track bytes for indexing               
-            for pair in read_pairs {                     
+        DataTypeRaw::I64 => {
+            let mut datavec: Vec<i64> = vec![0; (total_bytes / 8) as usize];
+            let mut i: usize = 0; // dummy variable to track bytes for indexing
+            for pair in read_pairs {
                 reader.seek(SeekFrom::Start(pair.start_index))?;
-                let no_values = pair.no_bytes as usize / 8 ;
-                reader.read_i64_into::<O>(&mut datavec[i..i+no_values])?;
-                i += no_values;                                      
+                let no_values = pair.no_bytes as usize / 8;
+                reader.read_i64_into::<O>(&mut datavec[i..i + no_values])?;
+                i += no_values;
             }
             DataTypeVec::I64(datavec)
         }
         DataTypeRaw::U8 => {
-            let mut datavec: Vec<u8> = Vec::new();
+            let mut datavec: Vec<u8> = vec![0; *total_bytes as usize];
+            let mut i: usize = 0; // dummy variable to track bytes for indexing
             for pair in read_pairs {
-                reader.seek(SeekFrom::Start(pair.start_index))?;                    
-                datavec.push(reader.read_u8()?);
+                reader.seek(SeekFrom::Start(pair.start_index))?;
+                let no_values = pair.no_bytes as usize;
+                reader.read_exact(&mut datavec[i..i + no_values])?;
+                i += no_values;
             }
             DataTypeVec::U8(datavec)
         }
-        DataTypeRaw::U16 => {  
-            let mut datavec: Vec<u16> = vec![0; (total_bytes/2) as usize];
-            let mut i: usize = 0; // dummy variable to track bytes for indexing               
-            for pair in read_pairs {                     
+        DataTypeRaw::U16 => {
+            let mut datavec: Vec<u16> = vec![0; (total_bytes / 2) as usize];
+            let mut i: usize = 0; // dummy variable to track bytes for indexing
+            for pair in read_pairs {
                 reader.seek(SeekFrom::Start(pair.start_index))?;
-                let no_values = pair.no_bytes as usize / 2 ;
-                reader.read_u16_into::<O>(&mut datavec[i..i+no_values])?;
-                i += no_values;                                      
+                let no_values = pair.no_bytes as usize / 2;
+                reader.read_u16_into::<O>(&mut datavec[i..i + no_values])?;
+                i += no_values;
             }
             DataTypeVec::U16(datavec)
         }
-        DataTypeRaw::U32 => {  
-            let mut datavec: Vec<u32> = vec![0; (total_bytes/4) as usize];
-            let mut i: usize = 0; // dummy variable to track bytes for indexing               
-            for pair in read_pairs {                     
+        DataTypeRaw::U32 => {
+            let mut datavec: Vec<u32> = vec![0; (total_bytes / 4) as usize];
+            let mut i: usize = 0; // dummy variable to track bytes for indexing
+            for pair in read_pairs {
                 reader.seek(SeekFrom::Start(pair.start_index))?;
-                let no_values = pair.no_bytes as usize / 4 ;
-                reader.read_u32_into::<O>(&mut datavec[i..i+no_values])?;
-                i += no_values;                                      
+                let no_values = pair.no_bytes as usize / 4;
+                reader.read_u32_into::<O>(&mut datavec[i..i + no_values])?;
+                i += no_values;
             }
             DataTypeVec::U32(datavec)
         }
-        DataTypeRaw::U64 => {  
-            let mut datavec: Vec<u64> = vec![0; (total_bytes/8) as usize];
-            let mut i: usize = 0; // dummy variable to track bytes for indexing               
-            for pair in read_pairs {                     
+        DataTypeRaw::U64 => {
+            let mut datavec: Vec<u64> = vec![0; (total_bytes / 8) as usize];
+            let mut i: usize = 0; // dummy variable to track bytes for indexing
+            for pair in read_pairs {
                 reader.seek(SeekFrom::Start(pair.start_index))?;
-                let no_values = pair.no_bytes as usize / 8 ;
-                reader.read_u64_into::<O>(&mut datavec[i..i+no_values])?;
-                i += no_values;                                      
+                let no_values = pair.no_bytes as usize / 8;
+                reader.read_u64_into::<O>(&mut datavec[i..i + no_values])?;
+                i += no_values;
             }
             DataTypeVec::U64(datavec)
         }
         DataTypeRaw::TdmsString => {
             let mut datavec: Vec<String> = Vec::new();
             for pair in read_pairs {
-                reader.seek(SeekFrom::Start(pair.start_index))?;                    
+                reader.seek(SeekFrom::Start(pair.start_index))?;
                 datavec.push(read_string::<R, O>(reader)?);
             }
             DataTypeVec::TdmsString(datavec)
         }
-        DataTypeRaw::SingleFloat => {  
-            let mut datavec: Vec<f32> = vec![0.0; (total_bytes/4) as usize];
-            let mut i: usize = 0; // dummy variable to track bytes for indexing               
-            for pair in read_pairs {                     
+        DataTypeRaw::SingleFloat => {
+            let mut datavec: Vec<f32> = vec![0.0; (total_bytes / 4) as usize];
+            let mut i: usize = 0; // dummy variable to track bytes for indexing
+            for pair in read_pairs {
                 reader.seek(SeekFrom::Start(pair.start_index))?;
-                let no_values = pair.no_bytes as usize / 4 ;
-                reader.read_f32_into::<O>(&mut datavec[i..i+no_values])?;
-                i += no_values;                                      
+                let no_values = pair.no_bytes as usize / 4;
+                reader.read_f32_into::<O>(&mut datavec[i..i + no_values])?;
+                i += no_values;
             }
             DataTypeVec::Float(datavec)
         }
-        DataTypeRaw::DoubleFloat => {  
-            let mut datavec: Vec<f64> = vec![0.0; (total_bytes/8) as usize];
-            let mut i: usize = 0; // dummy variable to track bytes for indexing               
-            for pair in read_pairs {                     
+        DataTypeRaw::DoubleFloat => {
+            let mut datavec: Vec<f64> = vec![0.0; (total_bytes / 8) as usize];
+            let mut i: usize = 0; // dummy variable to track bytes for indexing
+            for pair in read_pairs {
                 reader.seek(SeekFrom::Start(pair.start_index))?;
-                let no_values = pair.no_bytes as usize / 8 ;
-                reader.read_f64_into::<O>(&mut datavec[i..i+no_values])?;
-                i += no_values;                                      
+                let no_values = pair.no_bytes as usize / 8;
+                reader.read_f64_into::<O>(&mut datavec[i..i + no_values])?;
+                i += no_values;
             }
             DataTypeVec::Double(datavec)
         }
         _ => DataTypeVec::Void(Vec::new()), // Stump implementation until I can get some feedback on generics
-    };        
+    };
     Ok(datavec)
 }
 
