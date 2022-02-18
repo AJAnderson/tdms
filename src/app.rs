@@ -84,6 +84,8 @@ impl epi::App for TemplateApp {
                             {
                                 // copy in channel path (Todo: This could just be a reference to the vector index)
                                 self.selected_channel = Some(channel.clone());
+                                // print the channel properties (for debuggings)
+                                // self.file_handle.as_mut().unwrap().object_properties(&channel);
                                 let result = self.file_handle.as_mut().unwrap().load_data(&channel);
                                 match result {
                                     Ok(data) => {
@@ -113,7 +115,7 @@ impl epi::App for TemplateApp {
             if let Some(data) = self.cached_data.clone() {
                 match &data {
                     DataTypeVec::Double(datavector) => {
-                        let iter = datavector.iter().step_by(10);
+                        let iter = datavector.iter().step_by(1);
                         let vecy = (0..iter.len()).zip(iter).map(|(i, val)| {
                             let x = i as f64;
                             Value::new(x, val.clone())

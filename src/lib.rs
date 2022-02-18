@@ -6,6 +6,7 @@ use std::io::{BufReader, ErrorKind, Read, Seek, SeekFrom};
 use std::path;
 
 use byteorder::{BE, LE, *};
+use log::{debug};
 pub mod tdms_datatypes;
 pub use tdms_datatypes::{
     read_data_vector, read_datatype, read_string, DataType, DataTypeRaw, DataTypeVec, TocMask,
@@ -254,11 +255,13 @@ impl TdmsMap {
         reader: &mut R,
         mut segment: TdmsSegment,
     ) -> Result<TdmsSegment, TdmsError> {
-        println!("_______ENTERING SEGMENT________");
+        debug!("_______ENTERING SEGMENT________");
         // Finish out the lead in
         segment.version_no = reader.read_u32::<O>()?;
         segment.next_seg_offset = reader.read_u64::<O>()?;
         segment.raw_data_offset = reader.read_u64::<O>()?;
+
+        debug!("NewObjFlag?: {}", segment.toc_mask.has_flag(TocProperties::KTocNewObjList));
 
         // Load the meta_data for this segment, parsing objects that appear in this segment
         let mut meta_data = TdmsMetaData::read_metadata::<R, O>(self, reader)?;
@@ -350,6 +353,7 @@ impl TdmsMap {
             } else {
                 0
             };
+            debug!("Type Size: {}", type_size);
     
             //compute read pairs as we go to save double iteration over the objects map,
             // only compute if size here is > 0
@@ -369,17 +373,22 @@ impl TdmsMap {
                             .has_flag(TocProperties::KTocInterleavedData),
                         stride: Some(meta_data.channels_size - type_size),
                     };
+
+                    debug!("Read Pair {:?}", pair);
                     
                     object_map.read_map.push(pair);
                     accumulating_obj_size += object_map.last_object.total_size;
                 }
             };
+            debug!("Accum Obj Size: {}", accumulating_obj_size);
             
             object_map.total_bytes += accumulating_obj_size;
             object_map.bigendian = segment.toc_mask.has_flag(TocProperties::KTocBigEndian);
     
             // If interleaved then the start position depends on the item sizes, if continuous
             // then it's the number of values x type size i.e. "total_size"
+            debug!("Interleaved data: {}",segment.toc_mask.has_flag(TocProperties::KTocInterleavedData));
+            debug!("Flags: {:b}", segment.toc_mask.flags);
             if segment
                 .toc_mask
                 .has_flag(TocProperties::KTocInterleavedData)
@@ -388,6 +397,7 @@ impl TdmsMap {
             } else {
                 relative_position += object_map.last_object.total_size;
             }
+            debug!("relative position: {}", relative_position);
         }
     
         Ok(())
@@ -590,7 +600,11 @@ impl TdmsObject {
         tdms_map: &mut TdmsMap,
         reader: &mut R,
     ) -> Result<TdmsObject, TdmsError> {
-        let path = read_string::<R, O>(reader)?;
+        let path = read_string::<R, O>(reader)?;        
+
+        // Trying to juggle borrows, check flag now
+        // Prior object?
+        let prior_object = tdms_map.all_objects.contains_key(&path);
 
         // Try to obtain a reference to the last record of the objects
         // to update in place, create a default entry if none present
@@ -599,10 +613,16 @@ impl TdmsObject {
             .entry(path.clone())
             .or_default()
             .last_object;
+
+        debug!("object_path: {}", path);
         new_object.object_path = path;
+        for live in &tdms_map.live_objects {
+            debug!("Map object: {}", live);
+        }        
 
         new_object.index_info_len = reader.read_u32::<O>()?;
 
+        debug!("index len: {}", new_object.index_info_len);
         if new_object.index_info_len == 0xFFFF_FFFF {
             // No raw data in this object
             new_object.update_properties::<R, O>(reader)?;
@@ -611,12 +631,8 @@ impl TdmsObject {
             // data indices
             Ok(new_object.clone())
         } else if new_object.index_info_len == 0 {
-            // raw data index for this object should be identical to previous segments.
-            println!("object path: {}", new_object.object_path);
-            for live in &tdms_map.live_objects {
-                println!("Map object: {}", live);
-            }
-            if !tdms_map.live_objects.contains(&new_object.object_path) {
+            // raw data index for this object should be identical to previous segments.                      
+            if !prior_object {
                 Err(TdmsError {
                     kind: TdmsErrorKind::NoPreviousObject,
                 })

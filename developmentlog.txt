@@ -592,3 +592,42 @@ of the fact that the object has already been loaded into the all_objects map. Ye
 Due to a mutable borrow over immutable borrow issue with the structs had to rewrite the update_indexes to be an independent function that takes the indexmap as input directly.
 
 I think I can also strip the guard for meta_data.chunk_size being >0 but will compile here as it's a fairly big milestone.
+
+Committed but the LE test files are still broken triggering noPreviousObject
+
+13/2/2022
+
+Group2/DoubleRampArray appears in the very first segment wiht index length: 14
+
+Something is off about the live_objects map, need to see when the flag is being set.
+
+Ok, in this file it's set every time. So that implies that maybe it's possible for index information to be carried over many segments between when it first appears and when it's next used identically. So maybe need to check all_objects and reuse rather than checking live objects?
+
+That seemed to fix it, but that definitely doesn't match the implications of the file specification at: https://www.ni.com/en-nz/support/documentation/supplemental/07/tdms-file-format-internal-structure.html
+
+Specifically:
+If the raw data index of this object in this segment exactly matches the index the same object had in the previous segment, an unsigned 32-bit integer (0x0000000) will be stored instead of the index information.
+
+Note "the previous" not "a previous", looking at the logged objects and their order in live_objects, the next time this segment appears it does seem to match the first time so the relative arrangement of the channels is preserved.
+
+Ok, starting now with updating read_vector implementation. Have an initial implementation for DoubleFloat in read_vector, need a test file. Can't find one online/
+
+18/2/2022
+Have some test files for interleaved data which includes strings. First start with trying to get interleaved data working, which is an i16 and an F64.
+
+Both load but there should be 10 blocks of data and appears to be only 1 block.
+
+For some reason the data files aren't recorded as interleaved (flag is not set, despite it being set in the recording VI) Don't know why only one block is being detected. Figured out the recording flag is more like a guide than a setting. The way I configured the waveforms over-rode it. I'm starting to wonder wheter you can actually interleave different datatypes?
+
+Ok, but then why is my thing only picking up one block of data. The buffer is being correctly read into......
+I forgot I implemented downsampling by 10...
+
+Ok got first actual interleaved test file, and it's not reading correctly :D, picking one channel then the other.
+
+Figured out I forgot to implement stride into the indexing strategy, but now I'm getting slice index out of range so something fucky is happeneing
+
+Stride is in bytes but the read call is expecting values i.e. 1 double = 8 bytes. So have to divide stride by type size. I guess this is where it gets weird, can more than one type size be interleaved? If not then the whole stride thing is a little bit silly. If so then how do you actually handle that?
+
+Incidentally, it's the Seek operation that needs to be moved, not the read in indices
+
+Nailed it, that's working

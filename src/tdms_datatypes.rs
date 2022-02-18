@@ -6,6 +6,7 @@ use crate::{ObjectMap, ReadPair, TdmsMap};
 use byteorder::*;
 use num_derive::FromPrimitive;
 use num_enum::IntoPrimitive;
+use log::{debug};
 
 #[derive(IntoPrimitive, Debug)]
 #[repr(u32)]
@@ -20,7 +21,7 @@ pub enum TocProperties {
 
 #[derive(Debug)]
 pub struct TocMask {
-    flags: u32,
+    pub flags: u32,
 }
 
 impl TocMask {
@@ -256,7 +257,7 @@ pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(
             DataTypeVec::I8(datavec)
         }
         DataTypeRaw::I16 => {
-            let mut datavec: Vec<i16> = vec![0; (total_bytes / 2) as usize];
+            let mut datavec: Vec<i16> = vec![0; (total_bytes / 2) as usize];            
             let mut i: usize = 0; // dummy variable to track bytes for indexing
             for pair in read_pairs {
                 reader.seek(SeekFrom::Start(pair.start_index))?;
@@ -361,11 +362,24 @@ pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(
         }
         DataTypeRaw::DoubleFloat => {
             let mut datavec: Vec<f64> = vec![0.0; (total_bytes / 8) as usize];
+            debug!("No of values in vec: {}", total_bytes / 8);
             let mut i: usize = 0; // dummy variable to track bytes for indexing
             for pair in read_pairs {
                 reader.seek(SeekFrom::Start(pair.start_index))?;
                 let no_values = pair.no_bytes as usize / 8;
-                reader.read_f64_into::<O>(&mut datavec[i..i + no_values])?;
+                debug!("Values in pair: {}", no_values);
+                if pair.interleaved {                    
+                    debug!("Reading Interleaved");
+                    for j in 0..no_values {
+                        reader.read_f64_into::<O>(&mut datavec[i + j..i + j + 1])?;
+                        // exclusive range, to make sure compiler sees slice datatype
+                        reader.seek(SeekFrom::Current(pair.stride.unwrap() as i64))?;
+                    }
+                } else {    
+                    debug!("Reading Contiguous");
+                    debug!("index start: {}", i);            
+                    reader.read_f64_into::<O>(&mut datavec[i..i + no_values])?;                    
+                }
                 i += no_values;
             }
             DataTypeVec::Double(datavec)
