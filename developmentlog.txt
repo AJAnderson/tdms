@@ -631,3 +631,44 @@ Stride is in bytes but the read call is expecting values i.e. 1 double = 8 bytes
 Incidentally, it's the Seek operation that needs to be moved, not the read in indices
 
 Nailed it, that's working
+
+19/2/2022
+
+Really interesting suggestion from Kimundi:
+trait Foo {
+    const BYTES: usize;
+    fn read(reader: &..., bytes: &mut [u8]);
+    fn make_vec(v: Vec<Self>) -> DataTypeVec;
+}
+fn foo<T: Foo>(total_bytes: usize) {
+    let mut datavec: Vec<T> = vec![0; (total_bytes / T::BYTES) as usize];
+    let mut i: usize = 0; // dummy variable to track bytes for indexing
+    for pair in read_pairs {
+        reader.seek(SeekFrom::Start(pair.start_index))?;
+        let no_values = pair.no_bytes as usize / T::BYTES;
+        T::read(reader, &mut datavec[i..i + no_values])?;
+        i += no_values;
+    }
+    T::make_vec(datavec)
+}
+
+I'll try implementing that or something like it now.
+
+Got it to compile for floats, porting all the other cases now.
+
++ Huge change to the way read_data_vector is implemented.
++ Introduced TdmsVector trait
++ Introduced read_into_vec function which is generic over objects implementing TdmsVector
++ Implemented TdmsVector for the common numuerics.
++ Updated TODOs list for other type implementations
+
+Trying to look at strings, the way they work appears very strange, before a block of strings there's a block of string lengths, each new u32 entry for string length sums up the preceeding lengths
+
+20/2/2022
+
+Working on bool first, have an example test file, definitely stored as u8
++ Done bool, it loads but haven't sorted display out for it
+
+The Floats with units don't actually appear to be any kind of bespoke binary data, they're just doubles/floats with a unit property. Though to be fair, I don't actually know if I correctly recorded those.
+
+Focussing on the common strings then timestamp. I think I have to provide a num_values as input to all read functions to handle strings specifically. Might also need to carry type size around with the read pairs. This would have the benefit of getting it out of being a Trait const.

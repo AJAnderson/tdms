@@ -85,7 +85,7 @@ impl epi::App for TemplateApp {
                                 // copy in channel path (Todo: This could just be a reference to the vector index)
                                 self.selected_channel = Some(channel.clone());
                                 // print the channel properties (for debuggings)
-                                // self.file_handle.as_mut().unwrap().object_properties(&channel);
+                                self.file_handle.as_mut().unwrap().object_with_read_pairs(&channel);
                                 let result = self.file_handle.as_mut().unwrap().load_data(&channel);
                                 match result {
                                     Ok(data) => {
