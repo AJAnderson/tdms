@@ -1,6 +1,6 @@
 // #![warn(clippy::all)]
 use flexi_logger::{opt_format, Logger};
-mod tdms_error;
+
 use rstdms::TdmsError;
 use std::env;
 

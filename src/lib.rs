@@ -8,10 +8,11 @@ use std::path;
 use byteorder::{BE, LE, *};
 use log::debug;
 pub mod tdms_datatypes;
-pub use tdms_datatypes::{
-    read_data_vector, read_datatype, read_string, DataType, DataTypeRaw, DataTypeVec, TocMask,
+use tdms_datatypes::{
+    read_data_vector, read_datatype, read_string, DataType, DataTypeRaw, TocMask,
     TocProperties,
 };
+pub  use tdms_datatypes::{DataTypeVec};
 pub mod tdms_error;
 pub use tdms_error::{TdmsError, TdmsErrorKind};
 
@@ -34,7 +35,7 @@ Root Object
 /// raw data chunks in the file in which the channel is present.
 pub struct ReadPair {
     start_index: u64,
-    no_bytes: u64,
+    no_values: u64,
     interleaved: bool,
     /// This is the sum of the datatype sizes for all channels in the chunk i.e. the number of bytes till
     /// the next value of this channel in interleaved data. Only present if interleaved is true.
@@ -45,8 +46,8 @@ impl fmt::Display for ReadPair {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(
             f,
-            "start: {}\t no_bytes: {}",
-            self.start_index, self.no_bytes
+            "start: {}\t no_values: {}",
+            self.start_index, self.no_values
         )?;
         Ok(())
     }
@@ -57,7 +58,8 @@ impl fmt::Display for ReadPair {
 pub struct ObjectMap {
     last_object: TdmsObject, // the most up to date version of the object, properties and indexing information are copied to this.
     read_map: Vec<ReadPair>, // for each segment in the file a vector of read pairs exist.
-    total_bytes: u64, // The total byte count of raw data associated with the object, for allocating vectors to dump the data into.
+    total_bytes: u64, // The total byte count of raw data associated with the object, for keeping track of locations in file
+    total_values: usize, // Used to allocate memory to read the data
     bigendian: bool,  // whether the object associated with this map has been logged as bigendian
 }
 
@@ -67,6 +69,7 @@ impl Default for ObjectMap {
             last_object: TdmsObject::default(),
             read_map: Vec::new(),
             total_bytes: 0,
+            total_values: 0,
             bigendian: false,
         }
     }
@@ -132,7 +135,7 @@ impl TdmsFile {
         let mut objects: Vec<&str> = Vec::new();
 
         for (key, object_map) in &self.tdms_map.all_objects {
-            if object_map.last_object.total_size > 0 {
+            if object_map.last_object.no_bytes > 0 {
                 objects.push(key);
             }
         }
@@ -270,7 +273,6 @@ impl TdmsMap {
         let mut meta_data = TdmsMetaData::read_metadata::<R, O>(self, reader)?;
 
         // Update the object maps
-        // TODO: This still does not handle interleaved data at all
         if segment.toc_mask.has_flag(TocProperties::KTocNewObjList) {
             // create new map of objects
             let mut new_map: Vec<String> = Vec::new();
@@ -309,11 +311,11 @@ impl TdmsMap {
             // accounting for all live_objects
             for key in self.live_objects.iter() {
                 let object_map = self.all_objects.get(key).unwrap();
-                new_chunk_size += object_map.last_object.total_size;
+                new_chunk_size += object_map.last_object.no_bytes;
                 if let Some(raw_type) = object_map.last_object.raw_data_type {
                     new_channels_size += match raw_type {
                         // TODO no idea if this is correct i.e. how strings interleave
-                        DataTypeRaw::TdmsString => object_map.last_object.total_size,
+                        DataTypeRaw::TdmsString => object_map.last_object.no_bytes,
                         other => other.size()?,
                     };
                 };
@@ -348,7 +350,7 @@ impl TdmsMap {
             let type_size = if let Some(raw_type) = object_map.last_object.raw_data_type {
                 match raw_type {
                     // TODO no idea if this is correct i.e. how strings interleave
-                    DataTypeRaw::TdmsString => object_map.last_object.total_size,
+                    DataTypeRaw::TdmsString => object_map.last_object.no_bytes,
                     other => other.size()?,
                 }
             } else {
@@ -358,9 +360,7 @@ impl TdmsMap {
 
             //compute read pairs as we go to save double iteration over the objects map,
             // only compute if size here is > 0
-
-            let mut accumulating_obj_size: u64 = 0;
-            if object_map.last_object.total_size > 0 {
+            if object_map.last_object.no_bytes > 0 {                
                 for i in 0..segment.no_chunks {
                     let pair = ReadPair {
                         start_index: segment.start_index
@@ -368,7 +368,7 @@ impl TdmsMap {
                             + segment.raw_data_offset
                             + i * meta_data.chunk_size
                             + relative_position,
-                        no_bytes: object_map.last_object.total_size,
+                        no_values: object_map.last_object.no_raw_vals.unwrap(),                    
                         interleaved: segment
                             .toc_mask
                             .has_flag(TocProperties::KTocInterleavedData),
@@ -378,16 +378,19 @@ impl TdmsMap {
                     debug!("Read Pair {:?}", pair);
 
                     object_map.read_map.push(pair);
-                    accumulating_obj_size += object_map.last_object.total_size;
+                    object_map.total_bytes += object_map.last_object.no_bytes;
+                    object_map.total_values += object_map.last_object.no_raw_vals.unwrap() as usize;
+                    debug!("Accum values: {}", object_map.total_values);                    
                 }
             };
-            debug!("Accum Obj Size: {}", accumulating_obj_size);
 
-            object_map.total_bytes += accumulating_obj_size;
+            debug!("Accum Obj Size: {}", object_map.total_bytes);
+
+            
             object_map.bigendian = segment.toc_mask.has_flag(TocProperties::KTocBigEndian);
 
             // If interleaved then the start position depends on the item sizes, if continuous
-            // then it's the number of values x type size i.e. "total_size"
+            // then it's the number of values x type size i.e. "total_bytes"
             debug!(
                 "Interleaved data: {}",
                 segment
@@ -401,7 +404,7 @@ impl TdmsMap {
             {
                 relative_position += type_size;
             } else {
-                relative_position += object_map.last_object.total_size;
+                relative_position += object_map.last_object.no_bytes;
             }
             debug!("relative position: {}", relative_position);
         }
@@ -497,11 +500,11 @@ impl TdmsMetaData {
             // Read in an object including properties
             let obj = TdmsObject::update_read_object::<R, O>(tdms_map, reader)?;
             // Keep track of the accumulating raw data size for objects
-            chunk_size += obj.total_size;
+            chunk_size += obj.no_bytes;
 
             if let Some(raw_type) = obj.raw_data_type {
                 channels_size += match raw_type {
-                    DataTypeRaw::TdmsString => obj.total_size, // TODO no idea if this is correct i.e. how strings interleave
+                    DataTypeRaw::TdmsString => obj.no_bytes, // TODO no idea if this is correct i.e. how strings interleave
                     other => other.size()?,
                 };
             };
@@ -525,7 +528,7 @@ pub struct TdmsObject {
     raw_data_type: Option<DataTypeRaw>, // appears in file as u32.
     raw_data_dim: Option<u32>,
     no_raw_vals: Option<u64>,
-    total_size: u64, // of raw data in bytes, appears in file for variable length types (String) only. comptued otherwise
+    no_bytes: u64, // of raw data in bytes, appears in file for variable length types (String) only. comptued otherwise
     no_properties: u32,
     daqmx_info: Option<DAQMxInfo>,
     properties: IndexMap<String, ObjectProperty>,
@@ -569,7 +572,7 @@ impl Default for TdmsObject {
             raw_data_type: None,
             raw_data_dim: None,
             no_raw_vals: None,
-            total_size: 0,
+            no_bytes: 0,
             no_properties: 0,
             daqmx_info: None,
             properties: IndexMap::new(),
@@ -584,7 +587,7 @@ impl fmt::Display for TdmsObject {
         writeln!(f, "Raw data type:\t{:?}", self.raw_data_type)?;
         writeln!(f, "Raw data dim:\t{:?}", self.raw_data_dim)?;
         writeln!(f, "No. raw vals:\t{:?}", self.no_raw_vals)?;
-        writeln!(f, "Total size:\t{:?}", self.total_size)?;
+        writeln!(f, "Total size:\t{:?}", self.no_bytes)?;
         writeln!(f, "No. properties:\t{:?}", self.no_properties)?;
         writeln!(f, "Actual property count:\t{:?}", self.properties.len())?;
         for (_key, property) in self.properties.iter() {
@@ -657,7 +660,7 @@ impl TdmsObject {
             Ok(new_object.clone())
         } else {
             // This is a fresh, non DAQmx object, or amount of data has changed
-            new_object.read_sizeinfo::<R, O>(reader)?;
+            new_object.read_sizeinfo::<R, O>(reader)?;             
             new_object.update_properties::<R, O>(reader)?;
             Ok(new_object.clone())
         }
@@ -671,16 +674,20 @@ impl TdmsObject {
         let dim = reader.read_u32::<O>()?;
         let no_vals = reader.read_u64::<O>()?;
 
-        // total_size (bytes) is either recorded in the file if data is TdmsString or else
+        // total_bytes (bytes) is either recorded in the file if data is TdmsString or else
         // must be computed. Size() will return an error if called on DataTypeRaw::TdmsString
         // which is why there is a guard clause here.
-        self.total_size = match raw_data_type {
+        self.no_bytes = match raw_data_type {
             DataTypeRaw::TdmsString => reader.read_u64::<O>()?,
             other => other.size()? * no_vals * dim as u64,
         };
+        debug!("Object total bytes: {}", self.no_bytes);
+        debug!("Data Dim: {}", dim);
+        debug!("No Raw Vals: {}", no_vals);
         self.raw_data_type = Some(raw_data_type);
         self.raw_data_dim = Some(dim);
         self.no_raw_vals = Some(no_vals);
+        
 
         Ok(self)
     }

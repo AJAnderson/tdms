@@ -1,8 +1,8 @@
 use std::io::{Read, Seek, SeekFrom};
-use std::iter::IntoIterator;
+use std::fmt;
 
 use crate::tdms_error::{TdmsError, TdmsErrorKind};
-use crate::{ObjectMap, ReadPair, TdmsMap};
+use crate::{ObjectMap, ReadPair};
 use byteorder::*;
 use log::debug;
 use num_derive::FromPrimitive;
@@ -117,6 +117,28 @@ pub struct TdmsTimeStamp {
     pub radix: u64,
 }
 
+impl Default for TdmsTimeStamp {
+    fn default() -> Self {
+        TdmsTimeStamp {
+            epoch: 0,
+            radix: 0,
+        }
+    }
+}
+
+impl fmt::Display for TdmsTimeStamp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(
+            f,
+            "{}\t{}",
+            self.epoch, self.radix
+        )?;
+
+        Ok(())
+    }
+    
+}
+
 /// A wrapper type for data types found in tdms files
 /// QUESTION: Is there a better way to allow for generic returns in "read_data" functions
 #[derive(Debug, Clone)]
@@ -180,7 +202,7 @@ pub fn read_datatype<R: Read + Seek, O: ByteOrder>(
             let epoch = reader.read_i64::<O>()?;
             let radix = reader.read_u64::<O>()?;
             DataType::TimeStamp(TdmsTimeStamp { epoch, radix })
-        }
+        },
         _ => DataType::Void(()), // TODO this is a dirty placeholder
     };
 
@@ -218,16 +240,16 @@ pub enum DataTypeVec {
 }
 
 trait TdmsVector: Sized + Clone + Default {
-    const BYTES: usize;
+    
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
     ) -> Result<(), TdmsError>;
+
     fn make_vec(v: Vec<Self>) -> DataTypeVec;
 }
 
-impl TdmsVector for bool {
-    const BYTES: usize = 1; 
+impl TdmsVector for bool {  
 
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
@@ -250,8 +272,6 @@ impl TdmsVector for bool {
 }
 
 impl TdmsVector for i8 {
-    const BYTES: usize = 1;
-
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -266,8 +286,6 @@ impl TdmsVector for i8 {
 }
 
 impl TdmsVector for i16 {
-    const BYTES: usize = 2;
-
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -282,8 +300,6 @@ impl TdmsVector for i16 {
 }
 
 impl TdmsVector for i32 {
-    const BYTES: usize = 4;
-
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -298,8 +314,6 @@ impl TdmsVector for i32 {
 }
 
 impl TdmsVector for i64 {
-    const BYTES: usize = 8;
-
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -314,8 +328,6 @@ impl TdmsVector for i64 {
 }
 
 impl TdmsVector for u8 {
-    const BYTES: usize = 1;
-
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -330,8 +342,6 @@ impl TdmsVector for u8 {
 }
 
 impl TdmsVector for u16 {
-    const BYTES: usize = 2;
-
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -346,8 +356,6 @@ impl TdmsVector for u16 {
 }
 
 impl TdmsVector for u32 {
-    const BYTES: usize = 4;
-
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -362,8 +370,6 @@ impl TdmsVector for u32 {
 }
 
 impl TdmsVector for u64 {
-    const BYTES: usize = 8;
-
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -378,8 +384,6 @@ impl TdmsVector for u64 {
 }
 
 impl TdmsVector for f32 {
-    const BYTES: usize = 4;
-
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -394,7 +398,6 @@ impl TdmsVector for f32 {
 }
 
 impl TdmsVector for f64 {
-    const BYTES: usize = 8;
 
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
@@ -409,35 +412,62 @@ impl TdmsVector for f64 {
     }
 }
 
-// impl TdmsVector for String {
-//     const BYTES: usize = 8;
+impl TdmsVector for String {
+    fn read<R: Read + Seek, O: ByteOrder>(
+        buffer: &mut [Self],
+        reader: &mut R,
+    ) -> Result<(), TdmsError> {
+        let mut string_lengths: Vec<u32> = Vec::new();
+        for _ in 0..buffer.len() {
+            string_lengths.push(reader.read_u32::<O>()?);            
+        }
 
-//     fn read<R: Read + Seek, O: ByteOrder>(
-//         buffer: &mut [Self],
-//         reader: &mut R,
-//     ) -> Result<(), TdmsError> {
-//         let mut string_lengths: Vec<u32> = Vec::new();
-//         for
-//         reader.read_f64_into::<O>(buffer)?;
-//         Ok(())
-//     }
+        for i in 0..buffer.len() {
+            let mut str_raw_buf = if i == 0 {
+                vec![0u8; string_lengths[i] as usize]
+            } else {
+                vec![0u8; (string_lengths[i] - string_lengths[i-1]) as usize]
+            };
+            reader.read_exact(&mut str_raw_buf)?;
+            buffer[i] = String::from_utf8(str_raw_buf)?;
+        }        
+        Ok(())
+    }
 
-//     fn make_vec(datavec: Vec<Self>) -> DataTypeVec {
-//         DataTypeVec::Double(datavec)
-//     }
-// }
+    fn make_vec(datavec: Vec<Self>) -> DataTypeVec {
+        DataTypeVec::TdmsString(datavec)
+    }
+}
+
+impl TdmsVector for TdmsTimeStamp {
+    fn read<R: Read + Seek, O: ByteOrder>(
+        buffer: &mut [Self],
+        reader: &mut R,
+    ) -> Result<(), TdmsError> {
+        for i in 0..buffer.len() {
+            let epoch = reader.read_i64::<O>()?;
+            let radix = reader.read_u64::<O>()?;            
+            buffer[i] = TdmsTimeStamp { epoch, radix };
+        }        
+        Ok(())
+    }
+
+    fn make_vec(datavec: Vec<Self>) -> DataTypeVec {
+        DataTypeVec::TimeStamp(datavec)
+    }
+}
 
 fn read_into_vec<T: TdmsVector, R: Read + Seek, O: ByteOrder>(
     reader: &mut R,
     read_pairs: &Vec<ReadPair>,
-    total_bytes: usize,
+    total_values: usize,
 ) -> Result<DataTypeVec, TdmsError> {
-    let mut datavec: Vec<T> = vec![T::default(); total_bytes / T::BYTES];
+    let mut datavec: Vec<T> = vec![T::default(); total_values];
     let mut i: usize = 0; // dummy variable to track bytes for indexing
 
     for pair in read_pairs {
         reader.seek(SeekFrom::Start(pair.start_index))?;
-        let no_values = pair.no_bytes as usize / T::BYTES;
+        let no_values = pair.no_values as usize; // Maybe suspect for the interleaved comp
         if pair.interleaved {
             for j in 0..no_values {
                 // exclusive range, to make sure compiler sees slice datatype
@@ -460,28 +490,29 @@ pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(
     let read_pairs = &object_map.read_map;
     let rawtype = &object_map.last_object.raw_data_type.ok_or(TdmsError {
         kind: TdmsErrorKind::ObjectHasNoRawData,
-    })?;
-    let total_bytes = object_map.total_bytes as usize;
+    })?;    
+    let total_values = object_map.total_values;
+    debug!("Map total values: {}", total_values);
 
     let datavec: DataTypeVec = match rawtype {
         DataTypeRaw::Void => DataTypeVec::Void(Vec::new()),
-        DataTypeRaw::I8 => read_into_vec::<i8, R, O>(reader, read_pairs, total_bytes)?,
-        DataTypeRaw::I16 => read_into_vec::<i16, R, O>(reader, read_pairs, total_bytes)?,
-        DataTypeRaw::I32 => read_into_vec::<i32, R, O>(reader, read_pairs, total_bytes)?,
-        DataTypeRaw::I64 => read_into_vec::<i64, R, O>(reader, read_pairs, total_bytes)?,
-        DataTypeRaw::U8 => read_into_vec::<u8, R, O>(reader, read_pairs, total_bytes)?,
-        DataTypeRaw::U16 => read_into_vec::<u16, R, O>(reader, read_pairs, total_bytes)?,
-        DataTypeRaw::U32 => read_into_vec::<u32, R, O>(reader, read_pairs, total_bytes)?,
-        DataTypeRaw::U64 => read_into_vec::<u64, R, O>(reader, read_pairs, total_bytes)?,
-        DataTypeRaw::SingleFloat => read_into_vec::<f32, R, O>(reader, read_pairs, total_bytes)?,
-        DataTypeRaw::DoubleFloat => read_into_vec::<f64, R, O>(reader, read_pairs, total_bytes)?,
+        DataTypeRaw::I8 => read_into_vec::<i8, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::I16 => read_into_vec::<i16, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::I32 => read_into_vec::<i32, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::I64 => read_into_vec::<i64, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::U8 => read_into_vec::<u8, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::U16 => read_into_vec::<u16, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::U32 => read_into_vec::<u32, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::U64 => read_into_vec::<u64, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::SingleFloat => read_into_vec::<f32, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::DoubleFloat => read_into_vec::<f64, R, O>(reader, read_pairs, total_values)?,
         // DataTypeRaw::ExtendedFloat => {},
         // DataTypeRaw::SingleFloatWithUnit => {},
         // DataTypeRaw::DoubleFloatWithUnit => {},
         // DataTypeRaw::ExtendedFloatWithUnit => {},
-        DataTypeRaw::Boolean => read_into_vec::<bool, R, O>(reader, read_pairs, total_bytes)?,
-        // DataTypeRaw::TdmsString => {},
-        // DataTypeRaw::TimeStamp => {},
+        DataTypeRaw::Boolean => read_into_vec::<bool, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::TdmsString => read_into_vec::<String, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::TimeStamp => read_into_vec::<TdmsTimeStamp, R, O>(reader, read_pairs, total_values)?,
         // DataTypeRaw::FixedPoint => {},
         // DataTypeRaw::ComplexSingleFloat => {},
         // DataTypeRaw::ComplexDoubleFloat => {},

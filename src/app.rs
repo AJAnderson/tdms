@@ -3,6 +3,7 @@ use eframe::{egui, epi};
 use egui::plot::{Line, Value, Values};
 use rfd::FileDialog;
 use rstdms::{DataTypeVec, TdmsFile};
+use log::debug;
 
 pub struct TemplateApp {
     // Example stuff:
@@ -49,7 +50,7 @@ impl epi::App for TemplateApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
-    fn update(&mut self, ctx: &egui::CtxRef, frame: &epi::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &epi::Frame) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
             egui::menu::bar(ui, |ui| {
@@ -84,14 +85,13 @@ impl epi::App for TemplateApp {
                             {
                                 // copy in channel path (Todo: This could just be a reference to the vector index)
                                 self.selected_channel = Some(channel.clone());
-                                // print the channel properties (for debuggings)
-                                self.file_handle.as_mut().unwrap().object_with_read_pairs(&channel);
+                                // print the channel properties (for debugging)
                                 let result = self.file_handle.as_mut().unwrap().load_data(&channel);
                                 match result {
                                     Ok(data) => {
                                         self.cached_data = Some(data.clone());
                                     }
-                                    _ => unimplemented!(),
+                                    Err(err) => println!("{}", err),
                                 }
                             }
                         }
@@ -102,7 +102,7 @@ impl epi::App for TemplateApp {
                     let max_scroll =
                         ui.min_rect().height() - ui.clip_rect().height() + 2.0 * margin;
                     (current_scroll, max_scroll)
-                });
+                }).inner;
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -125,7 +125,17 @@ impl epi::App for TemplateApp {
                         egui::plot::Plot::new("Channel")
                             .view_aspect(1.0)
                             .show(ui, |plot_ui| plot_ui.line(line));
-                    }
+                    },
+                    DataTypeVec::TdmsString(datavector) => {
+                        for elem in datavector {
+                            println!("{}", elem);
+                        }
+                    },
+                    DataTypeVec::TimeStamp(datavector) => {
+                        for elem in datavector {
+                            println!("{}", elem);
+                        }
+                    },
                     _ => unimplemented!(),
                 };
             };

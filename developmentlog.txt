@@ -672,3 +672,50 @@ Working on bool first, have an example test file, definitely stored as u8
 The Floats with units don't actually appear to be any kind of bespoke binary data, they're just doubles/floats with a unit property. Though to be fair, I don't actually know if I correctly recorded those.
 
 Focussing on the common strings then timestamp. I think I have to provide a num_values as input to all read functions to handle strings specifically. Might also need to carry type size around with the read pairs. This would have the benefit of getting it out of being a Trait const.
+
+track no_values in read pair to save carrying around T::BYTES later
+
+21/02/2022
+
+Strings appears to be saving offsets but the first value in the list of offsets looks like the length, kind of quirky
+
+I've also somehow broken interleaved reading again, or at least a file I thought was not interleaved is actually interleaved and isn't working correctly. To be fixed after strings
+
+For string raw data the total byte count is recorded, as is the no_vals.
+
+Notes:
+- Stride is wrong I think for strings.
+- The start index for a string block points to the start of the lengths block.
+- The guard clause checking total_bytes > 0 before updating read pairs might be dated?
+
++ Initial implementation of string reading. I hope that the first element is always effectively the basic string length of the first element, whereas subsequent will be total length of string accumulated - preceeding length.
++ Introduced no_values to Object_map to simplify buffer allocation on read
+
+- String reading doesn't work for the "Interleaved" test file (not actually interleaved), think its failing because of chunk mis-computation.
+
++ Fixed the chunk miscomputation (not accumulating values correctly)
+
+- That Interleaved_StringArray file is very weird, I wonder if it might offer some insight into how strings of differnet lengths pack. Also I think my read code might be allocating a bunch of empty string vectors for some reason, the chunks of smaller strings are printed interspersed with blank lines. Might just be the file did something weird on write, it does record a bunch of zero length strings that don't exist.
+
+22/02/2022
+
+Have recreated the above behaviour, strings packed out with empty records (zero-length in the front matter) when one string array in a 2d array is longer.
+
+Also recreated that interleaved reading is broken again for an interleave string test file.
+
+Again the file reports its not actually interleaved. It's so fucking hard to create an interleaved test file I might just admit defeat on interleaved strings
+
+Ok, trying to fix Interleaved_Doubles, can't be bothered tonight
+
+23/02/2022
+
+Interleaved reading works for one specific case, the transposed doubles file. I think the suspect area is the computation of stride, definitely for strings but also more generally. The untranposed doubles says its interleaved, there are blocks of 2 values.
+
+Actually, I think it's not broken, I think it's interleaved 100 blocks of 2 values where one value is the 1st element and the other is the second.
+
++ Change object "total_bytes" field to "no_bytes" to disambiguate it from the total_bytes tracked in the object map
++ Deleted accumulatingbytes variable in favour of just updating the struct directly
++ General warnings tidy up (unused imports etc)
++ Upgrade to egui 0.17 which supports boxed zoom of plots
++ Implemented Timestamp read for vectors
++ Started experimenting with reorganizing the project, will do as a separate branch
