@@ -18,7 +18,8 @@ Todo items ("MVP"):
 - [ ] General tidy up of compiler warnings, module imports/organsation etc
 
 Future state:
-- [ ] Workspace or otherwise separate app from library code
+- [x] Workspace or otherwise separate app from library code
+- [ ] Might be able to stop cloning out objects all together if I tidy up the later algorithms to use the maps instead
 - [ ] Smart sub-sampling for speed (based on window size in pixels?)
 - [x] Box zoom (developed by nongiach)
 - [ ] Legend

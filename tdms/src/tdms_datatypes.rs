@@ -1,5 +1,5 @@
-use std::io::{Read, Seek, SeekFrom};
 use std::fmt;
+use std::io::{Read, Seek, SeekFrom};
 
 use crate::tdms_error::{TdmsError, TdmsErrorKind};
 use crate::{ObjectMap, ReadPair};
@@ -25,18 +25,20 @@ pub struct TocMask {
 }
 
 impl TocMask {
+    /// Convert a u32 into a ToCMask struct
     pub fn from_flags(flags: u32) -> TocMask {
         TocMask { flags }
     }
 
+    /// Check if a ToCMask has a given flag
     pub fn has_flag(&self, flag: TocProperties) -> bool {
         let flag_val: u32 = flag.into();
         (self.flags & flag_val) == flag_val
     }
 }
 
-/// The DataTypeRaw enum's values match the binary representation in
-/// tdms files.
+/// The DataTypeRaw enum's values match the binary representation of that
+/// type in tdms files.
 #[derive(FromPrimitive, Clone, Copy, Debug)]
 #[repr(u32)]
 pub enum DataTypeRaw {
@@ -87,13 +89,13 @@ impl DataTypeRaw {
             DataTypeRaw::SingleFloat => Ok(4),
             DataTypeRaw::DoubleFloat => Ok(8),
             DataTypeRaw::ExtendedFloat => Ok(10), // I'm guessing this is the x86 format
-            DataTypeRaw::SingleFloatWithUnit => Ok(4), // Size from nptdms, not sure if correct
-            DataTypeRaw::DoubleFloatWithUnit => Ok(8), // as above
-            DataTypeRaw::ExtendedFloatWithUnit => Ok(10), // as above
+            DataTypeRaw::SingleFloatWithUnit => Ok(4),
+            DataTypeRaw::DoubleFloatWithUnit => Ok(8),
+            DataTypeRaw::ExtendedFloatWithUnit => Ok(10),
             DataTypeRaw::Boolean => Ok(1),
             DataTypeRaw::TdmsString => Err(TdmsError {
                 kind: TdmsErrorKind::StringSizeNotDefined,
-            }), // size not defined
+            }),
             DataTypeRaw::TimeStamp => Ok(16),
             DataTypeRaw::FixedPoint => Ok(4), // total assumption here
             DataTypeRaw::ComplexSingleFloat => Ok(8), // 2 x floats
@@ -103,48 +105,26 @@ impl DataTypeRaw {
     }
 }
 
-/// Wrapper for a float with unit. QUESTION: Can the genericism of this type be
-/// limited to only real floats?
-#[derive(Debug, Clone)]
-pub struct FloatWithUnit<T> {
-    repr_type: T,
-    unit: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct TdmsTimeStamp {
+#[derive(Debug, Clone, Default)]
+pub struct TimeStamp {
     pub epoch: i64,
     pub radix: u64,
 }
 
-impl Default for TdmsTimeStamp {
-    fn default() -> Self {
-        TdmsTimeStamp {
-            epoch: 0,
-            radix: 0,
-        }
-    }
-}
-
-impl fmt::Display for TdmsTimeStamp {
+impl fmt::Display for TimeStamp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(
-            f,
-            "{}\t{}",
-            self.epoch, self.radix
-        )?;
+        writeln!(f, "{}\t{}", self.epoch, self.radix)?;
 
         Ok(())
     }
-    
 }
 
 /// A wrapper type for data types found in tdms files
 /// QUESTION: Is there a better way to allow for generic returns in "read_data" functions
 #[derive(Debug, Clone)]
 pub enum DataType {
-    Void(()), 
-    Boolean(bool), 
+    Void(()),
+    Boolean(bool),
     I8(i8),
     I16(i16),
     I32(i32),
@@ -155,18 +135,18 @@ pub enum DataType {
     U64(u64),
     Float(f32),
     Double(f64),
-    //Extended(f128), Can't represent this currently
-    FloatUnit(FloatWithUnit<f32>),
-    DoubleUnit(FloatWithUnit<f64>),
-    //ExtendedUnit(FloatWithUnit<f128>), Can't represent this currently
-    TdmsString(String), // Carries a length in front
-    // DaqMx(??)
+    // Extended(f128), // Can't represent this currently
+    // FloatUnit(f32), // These don't exist, they're a normal f32 paired with a property
+    // DoubleUnit(f64), // as above
+    //ExtendedUnit(FloatWithUnit<f128>), // Can't represent this currently
+    TdmsString(String),
+    // DaqMx(??), // I think these don't exist, it's a normal double with properties
     // ComplexSingle(??)
     // CompledDouble(??)
-    TimeStamp(TdmsTimeStamp),
+    TimeStamp(TimeStamp),
 }
 
-/// Helper function for reading string.
+/// Helper function for reading a string from file.
 pub fn read_string<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<String, TdmsError> {
     let str_len = reader.read_u32::<O>()?;
 
@@ -176,8 +156,6 @@ pub fn read_string<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<Strin
 }
 
 /// Reads data into the DataType enum based on the value of DataTypeRaw.
-/// The distinction exists because an enum can't have both a defined representation
-/// i.e. an integer value indicating which enum value it is, and a wrapped value
 pub fn read_datatype<R: Read + Seek, O: ByteOrder>(
     reader: &mut R,
     rawtype: DataTypeRaw,
@@ -194,29 +172,22 @@ pub fn read_datatype<R: Read + Seek, O: ByteOrder>(
         DataTypeRaw::I64 => DataType::I64(reader.read_i64::<O>()?),
         DataTypeRaw::SingleFloat => DataType::Float(reader.read_f32::<O>()?),
         DataTypeRaw::DoubleFloat => DataType::Double(reader.read_f64::<O>()?),
-        DataTypeRaw::Boolean => DataType::Boolean(match reader.read_u8()? {
-            0 => false,
-            _ => true,
-        }),
+        DataTypeRaw::Boolean => DataType::Boolean(!matches!(reader.read_u8()?, 0)),
         DataTypeRaw::TimeStamp => {
             let epoch = reader.read_i64::<O>()?;
             let radix = reader.read_u64::<O>()?;
-            DataType::TimeStamp(TdmsTimeStamp { epoch, radix })
-        },
-        _ => DataType::Void(()), // TODO this is a dirty placeholder
+            DataType::TimeStamp(TimeStamp { epoch, radix })
+        }
+        _ => unimplemented!(),
     };
 
     Ok(dataout)
 }
 
 /// A wrapper type for vectors of data types found in tdms files
-/// Previously I was using Vec<DataType> but this resulted in every
-/// element coming with information about what datatype it was which
-/// was un-necessary and looked gross
-/// See TdmsFileHandle::read_data_vector for the point of implementation
 #[derive(Debug, Clone)]
 pub enum DataTypeVec {
-    Void(Vec<()>), // Should nuke this somehow
+    Void(Vec<()>),
     Boolean(Vec<bool>),
     I8(Vec<i8>),
     I16(Vec<i16>),
@@ -228,19 +199,20 @@ pub enum DataTypeVec {
     U64(Vec<u64>),
     Float(Vec<f32>),
     Double(Vec<f64>),
-    //Extended(Vec<f128>), Can't represent this currently
-    FloatUnit(Vec<FloatWithUnit<f32>>),
-    DoubleUnit(Vec<FloatWithUnit<f64>>),
-    //ExtendedUnit(Vec<FloatWithUnit<f128>>), Can't represent this
+    // Extended(Vec<f128>),     // Can't represent this currently
+    // FloatUnit(Vec<f32>),     // Don't exist as distinct types in files
+    // DoubleUnit(Vec<f64>),    // Don't exist as distinct types in files
+    // ExtendedUnit(Vec<FloatWithUnit<f128>>), Can't represent this
     TdmsString(Vec<String>),
-    // DaqMx(Vec<??>)
+    // DaqMx(Vec<??>),          // Don't exist as distinct types in files
     // ComplexSingle(Vec<??>)
     // CompledDouble(Vec<??>)
-    TimeStamp(Vec<TdmsTimeStamp>),
+    TimeStamp(Vec<TimeStamp>),
 }
 
+/// Defines functionality required to read and construct a vector of Tdms
+/// data types
 trait TdmsVector: Sized + Clone + Default {
-    
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -249,20 +221,14 @@ trait TdmsVector: Sized + Clone + Default {
     fn make_vec(v: Vec<Self>) -> DataTypeVec;
 }
 
-impl TdmsVector for bool {  
-
+impl TdmsVector for bool {
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
     ) -> Result<(), TdmsError> {
-        let read_len = buffer.len();
-        for i in 0..read_len {
-            let bool_val = match reader.read_u8()? {
-                0 => false,
-                _ => true,
-            };
-            buffer[i] = bool_val;            
-        }  
+        for item in buffer.iter_mut() {
+            *item = !matches!(reader.read_u8()?, 0);
+        }
         Ok(())
     }
 
@@ -398,7 +364,6 @@ impl TdmsVector for f32 {
 }
 
 impl TdmsVector for f64 {
-
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
@@ -419,18 +384,18 @@ impl TdmsVector for String {
     ) -> Result<(), TdmsError> {
         let mut string_lengths: Vec<u32> = Vec::new();
         for _ in 0..buffer.len() {
-            string_lengths.push(reader.read_u32::<O>()?);            
+            string_lengths.push(reader.read_u32::<O>()?);
         }
 
         for i in 0..buffer.len() {
             let mut str_raw_buf = if i == 0 {
                 vec![0u8; string_lengths[i] as usize]
             } else {
-                vec![0u8; (string_lengths[i] - string_lengths[i-1]) as usize]
+                vec![0u8; (string_lengths[i] - string_lengths[i - 1]) as usize]
             };
             reader.read_exact(&mut str_raw_buf)?;
             buffer[i] = String::from_utf8(str_raw_buf)?;
-        }        
+        }
         Ok(())
     }
 
@@ -439,16 +404,16 @@ impl TdmsVector for String {
     }
 }
 
-impl TdmsVector for TdmsTimeStamp {
+impl TdmsVector for TimeStamp {
     fn read<R: Read + Seek, O: ByteOrder>(
         buffer: &mut [Self],
         reader: &mut R,
     ) -> Result<(), TdmsError> {
-        for i in 0..buffer.len() {
+        for item in buffer.iter_mut() {
             let epoch = reader.read_i64::<O>()?;
-            let radix = reader.read_u64::<O>()?;            
-            buffer[i] = TdmsTimeStamp { epoch, radix };
-        }        
+            let radix = reader.read_u64::<O>()?;
+            *item = TimeStamp { epoch, radix };
+        }
         Ok(())
     }
 
@@ -457,13 +422,15 @@ impl TdmsVector for TdmsTimeStamp {
     }
 }
 
+/// A generic function for reading different data types into a DataTypeVec enum
+/// dispatches to implementations according to type
 fn read_into_vec<T: TdmsVector, R: Read + Seek, O: ByteOrder>(
     reader: &mut R,
-    read_pairs: &Vec<ReadPair>,
+    read_pairs: &[ReadPair],
     total_values: usize,
 ) -> Result<DataTypeVec, TdmsError> {
     let mut datavec: Vec<T> = vec![T::default(); total_values];
-    let mut i: usize = 0; // dummy variable to track bytes for indexing
+    let mut i: usize = 0; // dummy variable to track values for indexing
 
     for pair in read_pairs {
         reader.seek(SeekFrom::Start(pair.start_index))?;
@@ -482,7 +449,8 @@ fn read_into_vec<T: TdmsVector, R: Read + Seek, O: ByteOrder>(
     Ok(T::make_vec(datavec))
 }
 
-
+/// Read a vector of a given tdms data type associated with an object,
+///  depending on the raw data type recorded for that object
 pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(
     object_map: &ObjectMap,
     reader: &mut R,
@@ -490,7 +458,7 @@ pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(
     let read_pairs = &object_map.read_map;
     let rawtype = &object_map.last_object.raw_data_type.ok_or(TdmsError {
         kind: TdmsErrorKind::ObjectHasNoRawData,
-    })?;    
+    })?;
     let total_values = object_map.total_values;
     debug!("Map total values: {}", total_values);
 
@@ -512,7 +480,9 @@ pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(
         // DataTypeRaw::ExtendedFloatWithUnit => {},
         DataTypeRaw::Boolean => read_into_vec::<bool, R, O>(reader, read_pairs, total_values)?,
         DataTypeRaw::TdmsString => read_into_vec::<String, R, O>(reader, read_pairs, total_values)?,
-        DataTypeRaw::TimeStamp => read_into_vec::<TdmsTimeStamp, R, O>(reader, read_pairs, total_values)?,
+        DataTypeRaw::TimeStamp => {
+            read_into_vec::<TimeStamp, R, O>(reader, read_pairs, total_values)?
+        }
         // DataTypeRaw::FixedPoint => {},
         // DataTypeRaw::ComplexSingleFloat => {},
         // DataTypeRaw::ComplexDoubleFloat => {},
@@ -521,39 +491,3 @@ pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(
     };
     Ok(datavec)
 }
-
-// #[derive(Debug, Clone)]
-// pub struct DataTypeVec {
-//     datatype: DataTypeRaw,
-//     data: Vec<Box<dyn Something>>,
-// }
-
-// pub trait Something<T> {
-//     fn make_native(&self) -> Vec<T>;
-// }
-
-// impl Something<u8> for DataTypeVec {
-//     fn make_native(&self) -> Result<Vec<u8>, TdmsError> {
-//         match self.datatype {
-//             DataTypeRaw::U8 => self.data,
-//             _ => TdmsErrorKind::ChannelDoesNotMatchDataType,
-//         }
-//     }
-// }
-
-// impl<T> Iterator for DataTypeVec<T> {
-//     type Item = T;
-
-//     fn next<T>(&mut self) -> Option<Self::Item> {}
-// }
-
-// #[derive(Debug, Clone)]
-// pub struct DataTypeVec<T>(Vec<T>);
-
-// Notes: Strings are stored concatenated in the raw data block with an array of offsets for each
-// string's first character stored first in the raw data according to the Tdms Reference.
-// In practise (in the Example.tdms file in this repo), this does not appear to be the case.
-// For any given string channel, its raw data index is the offset to the array which in turn
-// is meant to tell you where its character is. In the Example.tdms file this is not the case
-// There is no preceding array of first character indices, strings are concatenated in object
-// order.

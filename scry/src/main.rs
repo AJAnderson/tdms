@@ -1,13 +1,12 @@
 // #![warn(clippy::all)]
 use flexi_logger::{opt_format, Logger};
 
-use rstdms::TdmsError;
 use std::env;
 
 mod app;
 pub use app::TemplateApp;
 
-fn main() -> Result<(), TdmsError> {
+fn main() -> () {
     // Initialize a logger for logging debug messages, useful during prototyping
     // "rstdms=debug, lib=debug"
     Logger::with_env_or_str("rstdms=debug, lib=debug")
@@ -26,6 +25,4 @@ fn main() -> Result<(), TdmsError> {
     let app = TemplateApp::default();
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(Box::new(app), native_options);
-
-    Ok(())
 }

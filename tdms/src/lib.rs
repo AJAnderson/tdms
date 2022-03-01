@@ -8,14 +8,18 @@ use std::path;
 use byteorder::{BE, LE, *};
 use log::debug;
 pub mod tdms_datatypes;
+pub use tdms_datatypes::DataTypeVec;
 use tdms_datatypes::{
-    read_data_vector, read_datatype, read_string, DataType, DataTypeRaw, TocMask,
-    TocProperties,
+    read_data_vector, read_datatype, read_string, DataType, DataTypeRaw, TocMask, TocProperties,
 };
-pub  use tdms_datatypes::{DataTypeVec};
 pub mod tdms_error;
-pub use tdms_error::{TdmsError, TdmsErrorKind};
+pub use tdms_error::{Result, TdmsError, TdmsErrorKind};
 
+const HEADER_LEN: u64 = 28;
+const NO_RAW_DATA: u32 = 0xFFFF_FFFF;
+const DATA_INDEX_MATCHES_PREVIOUS: u32 = 0x0000_000;
+const FORMAT_CHANGING_SCALER: u32 = 0x6912_0000;
+const DIGITAL_LINE_SCALER: u32 = 0x6912_0000;
 /*
 The TDMS file structure consists of a series of segments which contain metadata regarding the file.
 Each segment contains any number of group objects, each of which can contain any number of properties.
@@ -54,25 +58,13 @@ impl fmt::Display for ReadPair {
 }
 
 /// A struct to maintain the vector of read pairs associated with a particular object (channel), as well as keep track of the object and any properties it accrues throughout the reading process. The set of maps for each object are maintained within the main "TdmsMap" struct via a hash map.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ObjectMap {
     last_object: TdmsObject, // the most up to date version of the object, properties and indexing information are copied to this.
     read_map: Vec<ReadPair>, // for each segment in the file a vector of read pairs exist.
     total_bytes: u64, // The total byte count of raw data associated with the object, for keeping track of locations in file
     total_values: usize, // Used to allocate memory to read the data
     bigendian: bool,  // whether the object associated with this map has been logged as bigendian
-}
-
-impl Default for ObjectMap {
-    fn default() -> Self {
-        ObjectMap {
-            last_object: TdmsObject::default(),
-            read_map: Vec::new(),
-            total_bytes: 0,
-            total_values: 0,
-            bigendian: false,
-        }
-    }
 }
 
 impl fmt::Display for ObjectMap {
@@ -87,27 +79,24 @@ impl fmt::Display for ObjectMap {
 
 pub struct TdmsFile {
     reader: BufReader<fs::File>,
-    pub tdms_map: TdmsMap,
+    tdms_map: TdmsMap,
 }
 
 impl TdmsFile {
     /// Open a Tdms file and initialize a buf rdr to handle access.
-    pub fn open(path: &path::Path) -> Result<TdmsFile, TdmsError> {
+    pub fn open(path: &path::Path) -> Result<TdmsFile> {
         let fh = fs::File::open(path)?;
         let file_length = fh.metadata().unwrap().len();
         println!("file size on load: {:?}", file_length);
-        let mut file_reader = io::BufReader::new(fh);
-        let mut tdms_map = TdmsMap::new()?;
-        tdms_map.map_segments(&mut file_reader, file_length)?;
+        let mut reader = io::BufReader::new(fh);
+        let mut tdms_map = TdmsMap::new();
+        tdms_map.map_segments(&mut reader, file_length)?;
 
-        Ok(TdmsFile {
-            reader: file_reader,
-            tdms_map: tdms_map,
-        })
+        Ok(TdmsFile { reader, tdms_map })
     }
 
     /// Stub implementation of load functionality, currently up to trying to get vector loading working gracefully
-    pub fn load_data(&mut self, path: &str) -> Result<DataTypeVec, TdmsError> {
+    pub fn load_data(&mut self, path: &str) -> Result<DataTypeVec> {
         // check if object exists in map
 
         let object_map = self.tdms_map.all_objects.get(path).ok_or(TdmsError {
@@ -143,7 +132,7 @@ impl TdmsFile {
     }
 
     /// Display an objects properties
-    pub fn object_properties(&self, path: &str) -> Result<(), TdmsError> {
+    pub fn object_properties(&self, path: &str) -> Result<()> {
         let object = self.tdms_map.all_objects.get(path).ok_or(TdmsError {
             kind: TdmsErrorKind::ChannelNotFound,
         })?;
@@ -154,7 +143,7 @@ impl TdmsFile {
     }
 
     /// Print an object's read pairs
-    pub fn object_with_read_pairs(&self, path: &str) -> Result<(), TdmsError> {
+    pub fn object_with_read_pairs(&self, path: &str) -> Result<()> {
         let object = self.tdms_map.all_objects.get(path).ok_or(TdmsError {
             kind: TdmsErrorKind::ChannelNotFound,
         })?;
@@ -178,12 +167,12 @@ pub struct TdmsMap {
 }
 
 impl TdmsMap {
-    fn new() -> Result<TdmsMap, io::Error> {
-        Ok(TdmsMap {
+    fn new() -> TdmsMap {
+        TdmsMap {
             segments: Vec::new(),
             all_objects: IndexMap::new(),
             live_objects: Vec::new(),
-        })
+        }
     }
 
     /// Walk the file attempting to load the segment meta data and objects.
@@ -193,7 +182,7 @@ impl TdmsMap {
         &mut self,
         reader: &mut R,
         file_length: u64,
-    ) -> Result<&mut Self, TdmsError> {
+    ) -> Result<&mut Self> {
         let mut next_segment_address = 0;
 
         // If the file is corrupted, the last segment will contain 0xFFFF_FFFF for the "next segment offset".
@@ -219,8 +208,8 @@ impl TdmsMap {
                 },
             };
 
-            let lead_in = 28; // length in bytes
-            next_segment_address = segment.next_seg_offset + next_segment_address + lead_in;
+            
+            next_segment_address = segment.next_seg_offset + next_segment_address + HEADER_LEN;
 
             self.segments.push(segment);
         }
@@ -234,7 +223,7 @@ impl TdmsMap {
         &mut self,
         reader: &mut R,
         start_index: u64,
-    ) -> Result<TdmsSegment, TdmsError> {
+    ) -> Result<TdmsSegment> {
         // Seek to the "absolute index" (relative to start) This index has to be built up for each segment as we go.
         // This is handled in the map_segments function
         reader.seek(SeekFrom::Start(start_index))?;
@@ -257,7 +246,7 @@ impl TdmsMap {
         &mut self,
         reader: &mut R,
         mut segment: TdmsSegment,
-    ) -> Result<TdmsSegment, TdmsError> {
+    ) -> Result<TdmsSegment> {
         debug!("_______ENTERING SEGMENT________");
         // Finish out the lead in
         segment.version_no = reader.read_u32::<O>()?;
@@ -339,11 +328,7 @@ impl TdmsMap {
         Ok(segment)
     }
 
-    fn update_indexes(
-        &mut self,
-        segment: &TdmsSegment,
-        meta_data: &TdmsMetaData,
-    ) -> Result<(), TdmsError> {
+    fn update_indexes(&mut self, segment: &TdmsSegment, meta_data: &TdmsMetaData) -> Result<()> {
         let mut relative_position: u64 = 0; // Used in computing read pairs as we go
         for key in self.live_objects.iter() {
             let object_map = self.all_objects.get_mut(key).unwrap();
@@ -360,15 +345,15 @@ impl TdmsMap {
 
             //compute read pairs as we go to save double iteration over the objects map,
             // only compute if size here is > 0
-            if object_map.last_object.no_bytes > 0 {                
+            if object_map.last_object.no_bytes > 0 {
                 for i in 0..segment.no_chunks {
                     let pair = ReadPair {
                         start_index: segment.start_index
-                            + 28
+                            + HEADER_LEN
                             + segment.raw_data_offset
                             + i * meta_data.chunk_size
                             + relative_position,
-                        no_values: object_map.last_object.no_raw_vals.unwrap(),                    
+                        no_values: object_map.last_object.no_raw_vals.unwrap(),
                         interleaved: segment
                             .toc_mask
                             .has_flag(TocProperties::KTocInterleavedData),
@@ -380,13 +365,12 @@ impl TdmsMap {
                     object_map.read_map.push(pair);
                     object_map.total_bytes += object_map.last_object.no_bytes;
                     object_map.total_values += object_map.last_object.no_raw_vals.unwrap() as usize;
-                    debug!("Accum values: {}", object_map.total_values);                    
+                    debug!("Accum values: {}", object_map.total_values);
                 }
             };
 
             debug!("Accum Obj Size: {}", object_map.total_bytes);
 
-            
             object_map.bigendian = segment.toc_mask.has_flag(TocProperties::KTocBigEndian);
 
             // If interleaved then the start position depends on the item sizes, if continuous
@@ -408,7 +392,6 @@ impl TdmsMap {
             }
             debug!("relative position: {}", relative_position);
         }
-
         Ok(())
     }
 }
@@ -436,7 +419,6 @@ impl fmt::Display for TdmsSegment {
         writeln!(f, "Next segment offset:\t{}", self.next_seg_offset)?;
         writeln!(f, "Raw data offset:\t{}", self.raw_data_offset)?;
         writeln!(f, "No_chunks:\t{}", self.no_chunks)?;
-
         Ok(())
     }
 }
@@ -444,7 +426,7 @@ impl fmt::Display for TdmsSegment {
 impl TdmsSegment {
     pub fn new(start_index: u64) -> TdmsSegment {
         TdmsSegment {
-            start_index: start_index,
+            start_index,
             file_tag: 0,
             toc_mask: TocMask::from_flags(0),
             version_no: 0,
@@ -463,7 +445,7 @@ pub struct TdmsMetaData {
     // figure out how many blocks of channel data there are in any given
     // segment
     chunk_size: u64,
-    /// The total byte size of each channels data type size
+    /// The sum total of byte sizes for each channel's data type
     channels_size: u64,
 }
 
@@ -485,11 +467,10 @@ impl TdmsMetaData {
     /// with respect to the start of the file.
     /// Read in objects, keep track of accumulating channel size so objects can be loaded
     /// later by directly addressing their constituent addresses
-    //#[rustfmt::skip]
     pub fn read_metadata<R: Read + Seek, O: ByteOrder>(
         tdms_map: &mut TdmsMap,
         reader: &mut R,
-    ) -> Result<TdmsMetaData, TdmsError> {
+    ) -> Result<TdmsMetaData> {
         let no_objects = reader.read_u32::<O>()?;
 
         let mut chunk_size: u64 = 0;
@@ -521,7 +502,7 @@ impl TdmsMetaData {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TdmsObject {
     object_path: String,
     index_info_len: u32, // The length in bytes of the indexing info for raw data, including the length of this field. Should always be 20 (defined length) or 28 (variable length)
@@ -552,7 +533,7 @@ pub struct DAQMxScaler {
 }
 
 impl DAQMxScaler {
-    pub fn new<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<DAQMxScaler, TdmsError> {
+    pub fn new<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<DAQMxScaler> {
         let scaler = DAQMxScaler {
             daqmx_data_type: DataTypeRaw::from_u32(reader.read_u32::<O>()?)?,
             daqmx_rawbuff_indx: reader.read_u32::<O>()?,
@@ -561,22 +542,6 @@ impl DAQMxScaler {
             scale_id: reader.read_u32::<O>()?,
         };
         Ok(scaler)
-    }
-}
-
-impl Default for TdmsObject {
-    fn default() -> Self {
-        TdmsObject {
-            object_path: String::new(),
-            index_info_len: 0,
-            raw_data_type: None,
-            raw_data_dim: None,
-            no_raw_vals: None,
-            no_bytes: 0,
-            no_properties: 0,
-            daqmx_info: None,
-            properties: IndexMap::new(),
-        }
     }
 }
 
@@ -605,11 +570,9 @@ impl TdmsObject {
     pub fn update_read_object<R: Read + Seek, O: ByteOrder>(
         tdms_map: &mut TdmsMap,
         reader: &mut R,
-    ) -> Result<TdmsObject, TdmsError> {
+    ) -> Result<TdmsObject> {
         let path = read_string::<R, O>(reader)?;
-
-        // Trying to juggle borrows, check flag now
-        // Prior object?
+        // check existence now for later use
         let prior_object = tdms_map.all_objects.contains_key(&path);
 
         // Try to obtain a reference to the last record of the objects
@@ -629,14 +592,13 @@ impl TdmsObject {
         new_object.index_info_len = reader.read_u32::<O>()?;
 
         debug!("index len: {}", new_object.index_info_len);
-        if new_object.index_info_len == 0xFFFF_FFFF {
-            // No raw data in this object
+        if new_object.index_info_len == NO_RAW_DATA {
             new_object.update_properties::<R, O>(reader)?;
 
             // TODO this clone is here (this function returns anything at all) to keep working with the prior algorithms for updating
             // data indices
             Ok(new_object.clone())
-        } else if new_object.index_info_len == 0 {
+        } else if new_object.index_info_len == DATA_INDEX_MATCHES_PREVIOUS {
             // raw data index for this object should be identical to previous segments.
             if !prior_object {
                 Err(TdmsError {
@@ -646,30 +608,25 @@ impl TdmsObject {
                 new_object.update_properties::<R, O>(reader)?;
                 Ok(new_object.clone())
             }
-        } else if new_object.index_info_len == 0x6912_0000 {
-            // DAQmx with format changing scaler.
+        } else if new_object.index_info_len == FORMAT_CHANGING_SCALER {
             new_object.read_sizeinfo::<R, O>(reader)?;
             new_object.read_daqmxinfo::<R, O>(reader)?;
             new_object.update_properties::<R, O>(reader)?;
             Ok(new_object.clone())
-        } else if new_object.index_info_len == 0x6913_0000 {
-            // DAQmx with digital line scaler
+        } else if new_object.index_info_len == DIGITAL_LINE_SCALER {
             new_object.read_sizeinfo::<R, O>(reader)?;
             new_object.read_daqmxinfo::<R, O>(reader)?;
             new_object.update_properties::<R, O>(reader)?;
             Ok(new_object.clone())
         } else {
             // This is a fresh, non DAQmx object, or amount of data has changed
-            new_object.read_sizeinfo::<R, O>(reader)?;             
+            new_object.read_sizeinfo::<R, O>(reader)?;
             new_object.update_properties::<R, O>(reader)?;
             Ok(new_object.clone())
         }
     }
 
-    fn read_sizeinfo<R: Read + Seek, O: ByteOrder>(
-        &mut self,
-        reader: &mut R,
-    ) -> Result<&mut Self, TdmsError> {
+    fn read_sizeinfo<R: Read + Seek, O: ByteOrder>(&mut self, reader: &mut R) -> Result<&mut Self> {
         let raw_data_type = DataTypeRaw::from_u32(reader.read_u32::<O>()?)?;
         let dim = reader.read_u32::<O>()?;
         let no_vals = reader.read_u64::<O>()?;
@@ -687,7 +644,6 @@ impl TdmsObject {
         self.raw_data_type = Some(raw_data_type);
         self.raw_data_dim = Some(dim);
         self.no_raw_vals = Some(no_vals);
-        
 
         Ok(self)
     }
@@ -695,7 +651,7 @@ impl TdmsObject {
     fn read_daqmxinfo<R: Read + Seek, O: ByteOrder>(
         &mut self,
         reader: &mut R,
-    ) -> Result<&mut Self, TdmsError> {
+    ) -> Result<&mut Self> {
         let daqmx_formatvec_size = reader.read_u32::<O>()?;
 
         let mut scalers: Vec<DAQMxScaler> = Vec::new();
@@ -712,7 +668,7 @@ impl TdmsObject {
 
         self.daqmx_info = Some(DAQMxInfo {
             formatvec_size: daqmx_formatvec_size,
-            scalers: scalers,
+            scalers,
             widthvec_size: daqmx_datawidthvec_size,
             widthvec: daqmx_data_width_vec,
         });
@@ -724,7 +680,7 @@ impl TdmsObject {
     fn update_properties<R: Read + Seek, O: ByteOrder>(
         &mut self,
         reader: &mut R,
-    ) -> Result<&mut Self, TdmsError> {
+    ) -> Result<&mut Self> {
         self.no_properties = reader.read_u32::<O>()?;
         if self.no_properties > 0 {
             for _i in 0..self.no_properties {
@@ -756,14 +712,10 @@ impl fmt::Display for ObjectProperty {
 
 impl ObjectProperty {
     /// Instantiate a property and read into it.
-    pub fn read_property<R: Read + Seek, O: ByteOrder>(
-        reader: &mut R,
-    ) -> Result<ObjectProperty, TdmsError> {
+    pub fn read_property<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<ObjectProperty> {
         let prop_name = read_string::<R, O>(reader)?;
         let data_type = DataTypeRaw::from_u32(reader.read_u32::<O>()?)?;
-
         let property = read_datatype::<R, O>(reader, data_type)?;
-
         Ok(ObjectProperty {
             prop_name,
             data_type,

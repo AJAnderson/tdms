@@ -1,19 +1,5 @@
-[package]
-authors = ["Alex Anderson <anderson.alexj@gmail.com>"]
-edition = "2018"
-name = "rstdms"
-version = "0.2.0"
-
-[dependencies]
-bitflags = "*"
-byteorder = ">=1.4.3"
-# charts = "0.3.0"
-eframe = "^0.17"
-flexi_logger = "^0.13.2"
-indexmap = "*"
-log = "0.4"
-num = "0.2.0"
-num-derive = "*"
-num-traits = "*"
-num_enum = "*"
-rfd = "0.4.3"
+[workspace]
+members = [
+    "tdms",
+    "scry"
+]

@@ -1,0 +1,17 @@
+[package]
+authors = ["Alex Anderson <anderson.alexj@gmail.com>"]
+edition = "2018"
+name = "tdms"
+version = "0.3.0"
+
+[dependencies]
+bitflags = "*"
+byteorder = ">=1.4.3"
+flexi_logger = "^0.13.2"
+indexmap = "*"
+log = "0.4"
+num = "0.2.0"
+num-derive = "*"
+num-traits = "*"
+num_enum = "*"
+

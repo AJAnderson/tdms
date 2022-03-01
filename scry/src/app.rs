@@ -1,9 +1,9 @@
 use eframe::egui::ScrollArea;
 use eframe::{egui, epi};
 use egui::plot::{Line, Value, Values};
-use rfd::FileDialog;
-use rstdms::{DataTypeVec, TdmsFile};
 use log::debug;
+use rfd::FileDialog;
+use tdms::{DataTypeVec, TdmsFile};
 
 pub struct TemplateApp {
     // Example stuff:
@@ -73,36 +73,39 @@ impl epi::App for TemplateApp {
                 }
                 let scroll_area = ScrollArea::new([false, true]);
 
-                let (current_scroll, max_scroll) = scroll_area.show(ui, |ui| {
-                    if self.channel_strings.len() > 0 {
-                        for (_i, channel) in self.channel_strings.iter().enumerate() {
-                            if ui
-                                .add(egui::SelectableLabel::new(
-                                    false,
-                                    channel.clone().replace("\n", " "), // here we strip new lines for display purposes.
-                                ))
-                                .clicked()
-                            {
-                                // copy in channel path (Todo: This could just be a reference to the vector index)
-                                self.selected_channel = Some(channel.clone());
-                                // print the channel properties (for debugging)
-                                let result = self.file_handle.as_mut().unwrap().load_data(&channel);
-                                match result {
-                                    Ok(data) => {
-                                        self.cached_data = Some(data.clone());
+                let (_current_scroll, _max_scroll) = scroll_area
+                    .show(ui, |ui| {
+                        if self.channel_strings.len() > 0 {
+                            for (_i, channel) in self.channel_strings.iter().enumerate() {
+                                if ui
+                                    .add(egui::SelectableLabel::new(
+                                        false,
+                                        channel.clone().replace("\n", " "), // here we strip new lines for display purposes.
+                                    ))
+                                    .clicked()
+                                {
+                                    // copy in channel path (Todo: This could just be a reference to the vector index)
+                                    self.selected_channel = Some(channel.clone());
+                                    // print the channel properties (for debugging)
+                                    let result =
+                                        self.file_handle.as_mut().unwrap().load_data(&channel);
+                                    match result {
+                                        Ok(data) => {
+                                            self.cached_data = Some(data.clone());
+                                        }
+                                        Err(err) => println!("{}", err),
                                     }
-                                    Err(err) => println!("{}", err),
                                 }
                             }
-                        }
-                    };
-                    let margin = ui.visuals().clip_rect_margin;
+                        };
+                        let margin = ui.visuals().clip_rect_margin;
 
-                    let current_scroll = ui.clip_rect().top() - ui.min_rect().top() + margin;
-                    let max_scroll =
-                        ui.min_rect().height() - ui.clip_rect().height() + 2.0 * margin;
-                    (current_scroll, max_scroll)
-                }).inner;
+                        let current_scroll = ui.clip_rect().top() - ui.min_rect().top() + margin;
+                        let max_scroll =
+                            ui.min_rect().height() - ui.clip_rect().height() + 2.0 * margin;
+                        (current_scroll, max_scroll)
+                    })
+                    .inner;
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -125,17 +128,17 @@ impl epi::App for TemplateApp {
                         egui::plot::Plot::new("Channel")
                             .view_aspect(1.0)
                             .show(ui, |plot_ui| plot_ui.line(line));
-                    },
+                    }
                     DataTypeVec::TdmsString(datavector) => {
                         for elem in datavector {
                             println!("{}", elem);
                         }
-                    },
+                    }
                     DataTypeVec::TimeStamp(datavector) => {
                         for elem in datavector {
                             println!("{}", elem);
                         }
-                    },
+                    }
                     _ => unimplemented!(),
                 };
             };

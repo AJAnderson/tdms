@@ -1,0 +1,12 @@
+[package]
+authors = ["Alex Anderson <anderson.alexj@gmail.com>"]
+name = "scry"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+eframe = "^0.17"
+tdms = {path = "../tdms"}
+rfd = "0.4.3"
+log = "0.4"
+flexi_logger = "^0.13.2"

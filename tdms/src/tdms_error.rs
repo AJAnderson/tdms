@@ -9,15 +9,17 @@ pub struct TdmsError {
     pub kind: TdmsErrorKind,
 }
 
+/// Errors propagated either from low level read operations, or from malformed
+/// data in the file
 #[derive(Debug)]
 pub enum TdmsErrorKind {
     Io(io::Error),
     FromUtf8(string::FromUtf8Error),
-    NoPreviousObject,     // raw_data_index == 0, but no previous object available.
-    StringSizeNotDefined, // size is called on TdmsString without first putting a guard in place.
-    RawDataTypeNotFound,  // Can't convert from u32 to DataTypeRaw enum variant
-    ChannelNotFound,      // Couldn't load the requested data because it does not appear in the file
-    ObjectHasNoRawData, // The object doesn't contain any raw data, may want to try just returning the properties.
+    NoPreviousObject,
+    StringSizeNotDefined,
+    RawDataTypeNotFound,
+    ChannelNotFound,
+    ObjectHasNoRawData,
 }
 
 impl fmt::Display for TdmsError {
@@ -27,7 +29,7 @@ impl fmt::Display for TdmsError {
             TdmsErrorKind::FromUtf8(e) => write!(f, "unable to convert buffer to string: {}", e)?,
             TdmsErrorKind::NoPreviousObject => write!(f, "Raw data index was equal to zero indicating this object has appeared before, but no previous object was recorded. Data may be malformed")?, 
             TdmsErrorKind::StringSizeNotDefined => write!(f, "Calling size directly on a DataTypeRaw::TdmsString is not meaningful. A file read operation is required to either verify total size of string data in a segment, or perform a string read. To perform a string read use 'match_read_string'")?,
-            TdmsErrorKind::RawDataTypeNotFound => write!(f, "The parsed u32 did not match a known raw data type")?,
+            TdmsErrorKind::RawDataTypeNotFound => write!(f, "The parsed u32 did not match a known data type")?,
             TdmsErrorKind::ChannelNotFound => write!(f, "The requested channel is not in the channel list, ensure special characters are correctly escaped")?,
             TdmsErrorKind::ObjectHasNoRawData => write!(f, "The requested object does not contain any raw data")?,
         }
@@ -69,3 +71,5 @@ impl std::error::Error for TdmsError {
         None
     }
 }
+
+pub type Result<T> = std::result::Result<T, TdmsError>;
