@@ -729,3 +729,7 @@ Actually, I think it's not broken, I think it's interleaved 100 blocks of 2 valu
 + Added the HEADER_LEN const to make semantics clearer as well as other consts taking inspo from Adam
 
 I think there's a hint of a smoother algo with less cloning to read and update objects and then compute indices. I'm pretty sure I could just update the live objects map once at the meta data read level (TdmsMetadata::read_metadata) based on kTocNewObjList, compute chunk_size etc in that pass and then
+
++ Modified the object update to take a path rather than perform the path read, and just cloned the paths into a vector for later iteration.
+
+Not tangibly faster in debug on the large test file

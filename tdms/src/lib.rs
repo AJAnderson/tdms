@@ -265,8 +265,8 @@ impl TdmsMap {
         if segment.toc_mask.has_flag(TocProperties::KTocNewObjList) {
             // create new map of objects
             let mut new_map: Vec<String> = Vec::new();
-            for object in meta_data.objects.iter() {
-                new_map.push(object.object_path.clone());
+            for object_path in meta_data.objects.iter() {
+                new_map.push(object_path.clone());
             }
             self.live_objects = new_map;
 
@@ -283,11 +283,11 @@ impl TdmsMap {
         } else {
             // Need to iterate over the new list of objects in the segment, this list should only contain newly added objects
             // check if it's in all_objects and update, otherwise update live objects
-            for object in meta_data.objects.iter() {
+            for object_path in meta_data.objects.iter() {
                 // If the object isn't in the live objects then it is truly new, so push it. If it is there
                 // then something about the object has changed but its order is still correct.
-                if !self.live_objects.contains(&object.object_path) {
-                    self.live_objects.push(object.object_path.clone());
+                if !self.live_objects.contains(object_path) {
+                    self.live_objects.push(object_path.clone());
                 }
             }
 
@@ -440,7 +440,7 @@ impl TdmsSegment {
 #[derive(Debug)]
 pub struct TdmsMetaData {
     no_objects: u32,
-    objects: Vec<TdmsObject>,
+    objects: Vec<String>,
     // chunk_size is used in combination with segment index information to
     // figure out how many blocks of channel data there are in any given
     // segment
@@ -475,11 +475,13 @@ impl TdmsMetaData {
 
         let mut chunk_size: u64 = 0;
         let mut channels_size: u64 = 0;
-        let mut objects: Vec<TdmsObject> = Vec::new();
+        let mut objects: Vec<String> = Vec::new();
 
         for _i in 0..no_objects {
+            let path = read_string::<R, O>(reader)?;
             // Read in an object including properties
-            let obj = TdmsObject::update_read_object::<R, O>(tdms_map, reader)?;
+            TdmsObject::update_read_object::<R, O>(tdms_map, path.clone(), reader)?;
+            let obj = &tdms_map.all_objects.get(&path).unwrap().last_object;
             // Keep track of the accumulating raw data size for objects
             chunk_size += obj.no_bytes;
 
@@ -490,7 +492,7 @@ impl TdmsMetaData {
                 };
             };
 
-            objects.push(obj);
+            objects.push(path);
         }
 
         Ok(TdmsMetaData {
@@ -569,9 +571,9 @@ impl TdmsObject {
     /// in the all_objects map.
     pub fn update_read_object<R: Read + Seek, O: ByteOrder>(
         tdms_map: &mut TdmsMap,
+        path: String,
         reader: &mut R,
-    ) -> Result<TdmsObject> {
-        let path = read_string::<R, O>(reader)?;
+    ) -> Result<()> {        
         // check existence now for later use
         let prior_object = tdms_map.all_objects.contains_key(&path);
 
@@ -594,36 +596,32 @@ impl TdmsObject {
         debug!("index len: {}", new_object.index_info_len);
         if new_object.index_info_len == NO_RAW_DATA {
             new_object.update_properties::<R, O>(reader)?;
-
-            // TODO this clone is here (this function returns anything at all) to keep working with the prior algorithms for updating
-            // data indices
-            Ok(new_object.clone())
         } else if new_object.index_info_len == DATA_INDEX_MATCHES_PREVIOUS {
             // raw data index for this object should be identical to previous segments.
             if !prior_object {
-                Err(TdmsError {
+                return Err(TdmsError {
                     kind: TdmsErrorKind::NoPreviousObject,
                 })
             } else {
                 new_object.update_properties::<R, O>(reader)?;
-                Ok(new_object.clone())
+
             }
         } else if new_object.index_info_len == FORMAT_CHANGING_SCALER {
             new_object.read_sizeinfo::<R, O>(reader)?;
             new_object.read_daqmxinfo::<R, O>(reader)?;
             new_object.update_properties::<R, O>(reader)?;
-            Ok(new_object.clone())
+
         } else if new_object.index_info_len == DIGITAL_LINE_SCALER {
             new_object.read_sizeinfo::<R, O>(reader)?;
             new_object.read_daqmxinfo::<R, O>(reader)?;
             new_object.update_properties::<R, O>(reader)?;
-            Ok(new_object.clone())
+
         } else {
             // This is a fresh, non DAQmx object, or amount of data has changed
             new_object.read_sizeinfo::<R, O>(reader)?;
             new_object.update_properties::<R, O>(reader)?;
-            Ok(new_object.clone())
         }
+        Ok(())
     }
 
     fn read_sizeinfo<R: Read + Seek, O: ByteOrder>(&mut self, reader: &mut R) -> Result<&mut Self> {

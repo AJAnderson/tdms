@@ -9,7 +9,7 @@ pub use app::TemplateApp;
 fn main() -> () {
     // Initialize a logger for logging debug messages, useful during prototyping
     // "rstdms=debug, lib=debug"
-    Logger::with_env_or_str("rstdms=debug, lib=debug")
+    Logger::with_env_or_str("rstdms=error, lib=error")
         .log_to_file()
         .directory("log_files")
         .format(opt_format)
