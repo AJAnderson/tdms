@@ -1,31 +1,63 @@
 use eframe::egui::ScrollArea;
 use eframe::{egui, epi};
-use egui::plot::{Line, Value, Values};
+// use eframe::egui::Ui;
+use egui::plot::{Legend, Line, Plot, Value, Values, Text};
+use egui::Align2;
 use log::debug;
 use rfd::FileDialog;
+use std::collections::HashMap;
+use std::error::Error;
 use tdms::{DataTypeVec, TdmsFile};
 
-pub struct TemplateApp {
-    // Example stuff:
-    file_handle: Option<TdmsFile>,
-    channel_strings: Vec<String>,
-    selected_channel: Option<String>,
-    cached_data: Option<DataTypeVec>,
+pub struct ChannelState {
+    name: String,
+    selected: bool,
 }
 
-impl Default for TemplateApp {
+// pub struct BoolHist {
+//     current: bool,
+//     previous: bool,
+// }
+
+// impl BoolHist {
+//     pub fn toggle(&mut self) -> () {
+//         if self.current {
+//             self.current = false;
+//             self.previous = true;
+//         } else {
+//             self.current = true;
+//             self.previous = false;
+//         }
+//     }
+
+//     pub fn was_on(&self) -> bool {
+//         self.previous
+//     }
+
+//     pub fn is_on(&self) -> bool {
+//         self.current
+//     }
+// }
+
+pub struct ScryApp {
+    // Example stuff:
+    file_handle: Option<TdmsFile>,
+    channel_state: Vec<ChannelState>,
+    cached_data: HashMap<String, DataTypeVec>,
+}
+
+impl Default for ScryApp {
     fn default() -> Self {
         Self {
             file_handle: None,
-            channel_strings: Vec::new(),
-            selected_channel: None,
-            cached_data: None,
+            channel_state: Vec::new(),
+            cached_data: HashMap::new(),
         }
     }
 }
 
 // Helper functions for loading channels, calls out to rstdms lib functions
-impl TemplateApp {
+impl ScryApp {
     fn open_dialog(&mut self) {
         if let Some(path) = FileDialog::new().pick_file() {
             let tdms_file = TdmsFile::open(&path).unwrap();
@@ -38,14 +70,33 @@ impl TemplateApp {
 
     fn populate_channels(&mut self) {
         for channel in self.file_handle.as_ref().expect("No chans").data_objects() {
-            self.channel_strings.push(channel.to_string());
+            self.channel_state.push(ChannelState {
+                name: channel.to_string(),
+                selected: false,
+            });
         }
+    }
+
+    fn cached_data_to_line(&mut self) -> Option<Vec<Line>> {
+        let mut out_lines: Vec<Line> = Vec::new();
+
+        for (name, data) in self.cached_data.iter() {
+            let double_data = Vec::<f64>::try_from(data.clone()).expect("Unimplemented datatype");
+            let iter = double_data.iter().step_by(1);
+            let vecy = (0..iter.len()).zip(iter).map(|(i, val)| {
+                let x = i as f64;
+                Value::new(x, *val)
+            });
+            out_lines.push(Line::new(Values::from_values_iter(vecy.clone())).name(name))
+        }
+
+        Some(out_lines)
     }
 }
 
-impl epi::App for TemplateApp {
+impl epi::App for ScryApp {
     fn name(&self) -> &str {
-        "TDMS Reader"
+        "Scry TDMS Reader"
     }
 
     /// Called each time the UI needs repainting, which may be many times per second.
@@ -66,7 +117,7 @@ impl epi::App for TemplateApp {
             .min_width(200.0)
             .resizable(true)
             .show(ctx, |ui| {
-                ui.heading("Side Panel");
+                ui.heading("Channels");
 
                 if ui.button("Load File").clicked() {
                     self.open_dialog()
@@ -75,27 +126,29 @@ impl epi::App for TemplateApp {
 
                 let (_current_scroll, _max_scroll) = scroll_area
                     .show(ui, |ui| {
-                        if self.channel_strings.len() > 0 {
-                            for (_i, channel) in self.channel_strings.iter().enumerate() {
-                                if ui
-                                    .add(egui::SelectableLabel::new(
-                                        false,
-                                        channel.clone().replace("\n", " "), // here we strip new lines for display purposes.
-                                    ))
-                                    .clicked()
-                                {
-                                    // copy in channel path (Todo: This could just be a reference to the vector index)
-                                    self.selected_channel = Some(channel.clone());
-                                    // print the channel properties (for debugging)
-                                    let result =
-                                        self.file_handle.as_mut().unwrap().load_data(&channel);
-                                    match result {
-                                        Ok(data) => {
-                                            self.cached_data = Some(data.clone());
+                        if self.channel_state.len() > 0 {
+                            for channel in self.channel_state.iter_mut() {
+                                ui.horizontal(|ui| {
+                                    ui.label(channel.name.clone().replace("\n", " "));
+                                    if ui.checkbox(&mut channel.selected, "").changed() {
+                                        if channel.selected {
+                                            let result = self
+                                                .file_handle
+                                                .as_mut()
+                                                .unwrap()
+                                                .load_data(&channel.name);
+                                            match result {
+                                                Ok(data) => {
+                                                    self.cached_data
+                                                        .insert(channel.name.clone(), data.clone());
+                                                }
+                                                Err(err) => println!("{}", err),
+                                            }
+                                        } else {
+                                            self.cached_data.remove_entry(&channel.name);
                                         }
-                                        Err(err) => println!("{}", err),
                                     }
-                                }
+                                });
                             }
                         };
                         let margin = ui.visuals().clip_rect_margin;
@@ -109,39 +162,23 @@ impl epi::App for TemplateApp {
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
-
+            // Main Plot Pannel
             ui.heading("Main plot");
 
             // If we have a chan_path then load it if we haven't already
-
-            if let Some(data) = self.cached_data.clone() {
-                match &data {
-                    DataTypeVec::Double(datavector) => {
-                        let iter = datavector.iter().step_by(1);
-                        let vecy = (0..iter.len()).zip(iter).map(|(i, val)| {
-                            let x = i as f64;
-                            Value::new(x, val.clone())
-                        });
-
-                        let line = Line::new(Values::from_values_iter(vecy.clone()));
-                        egui::plot::Plot::new("Channel")
-                            .view_aspect(1.0)
-                            .show(ui, |plot_ui| plot_ui.line(line));
-                    }
-                    DataTypeVec::TdmsString(datavector) => {
-                        for elem in datavector {
-                            println!("{}", elem);
+            if let Some(lines) = self.cached_data_to_line() {
+                Plot::new("Channel Data")                    
+                    .legend(Legend::default())
+                    .x_axis_formatter(|value, range| {                             
+                            format!("hello: {}", value).to_string()                             
+                         })
+                    .show(ui, |plot_ui| {
+                        for line in lines {
+                            plot_ui.line(line)
                         }
-                    }
-                    DataTypeVec::TimeStamp(datavector) => {
-                        for elem in datavector {
-                            println!("{}", elem);
-                        }
-                    }
-                    _ => unimplemented!(),
-                };
-            };
+                        plot_ui.text(Text::new(Value::new(0.0, 0.0), "Time").anchor(Align2::CENTER_TOP))
+                    });
+            }
 
             // Display something
             // let sin = (0..1000).map(|i| {

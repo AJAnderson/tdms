@@ -733,3 +733,37 @@ I think there's a hint of a smoother algo with less cloning to read and update o
 + Modified the object update to take a path rather than perform the path read, and just cloned the paths into a vector for later iteration.
 
 Not tangibly faster in debug on the large test file
+
+2/3/2022
+
+Ran some flamegraph comparisons to see, and noticed it actually is tangibly faster, like sub-second vs second+
+
++ stripped the TdmsError struct and just exposed the enum, in keeping with burntsushi's philosophy, stayed with 
+hand rolled error implementation to avoid macro compile penalties
++ used the Result alias in tdms_datatypes
+
+4/3/2022
+
++ Added an implementation of TryFrom which currently works to turn bool + numerics into f64.
++ Changed the app name away from TemplateApp
++ Moved the cached data -> line conversion into a method on ScryApp
+
+6/3/2022
+
+Working through adding checkbox select and multiplot. Currently run up against needing to track the previous state of the check box.
+Also trying to cache data. I think I need to index from the cached data back to the line somehow. Maybe vectors aren't appropriate.
+
+7/3/2022
+
+Currently ignoring the first item Checked
+Also need to figure out how to remove cached data on untick, probably need a hashmap rather than a vector
+
+Now it's toggling between two plots but not plotting them at the same time.
+
+8/3/2022
+
+Got it! needed to iterate inside the closure.
+
++ Enabled multi-plot including addition and removal of plots
+
+started tinkering with label formatting to display say date time instead of just samples.

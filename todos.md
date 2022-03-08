@@ -1,34 +1,22 @@
-Todo items ("MVP"):
-- [x] Fix whatever I broke that's casuing no previous object errors to appear or investigate file to determine if its real.
-- [x] Drill into the iteration logic for segments and nail it down, handle early return for malformed segments (DONE)
-- [x] interleaved data (new test file needed)
-- [x] interleaved read setup
-- [x] interleaved data presentation (read_vector update) 
-- [x] common function for read development
-- [x] Implement TypeVector for bool
-- [x] Implement TypeVector for Boolean
-- [x] Implement TypeVector for TdmsString
-- [x] Implement TypeVector for TimeStamp
-- [x] Understand how strings actually interleave, is length at the start of every byte block? (new test file needed)
-- [x] understand and verify chunk size handling for channels which are added (new test file needed) (DONE)
-- [x] separate out algorithm concerns into functions, i.e. update index step (WONT DO)
-- [x] Handle DAQmx data types (DONE)
-- [x] Test cases/files for each data type (specifically need to verify things like time stamps)
-- [x] Read data vector is overloaded, the entry gates and object finding stuff shouldn't live there.
-- [ ] General tidy up of compiler warnings, module imports/organsation etc
+Next Steps:
+- [x] Workspace or otherwise separate app from library code
+- [x] Change algorithm to minimize unnecessary object clones
+- [x] Tidy up error handling
+- [x] Lib helper method to convert to f64, theoretically can hold any value that a numeric could hold
+- [ ] Remove previous channel on load (or hold multiple files)
+- [x] Legend
+- [ ] Axes labels (not supported by egui, need to upstream changes)
+- [ ] Time series support
+- [ ] Smart sub-sampling for speed (based on window size in pixels?)
+
+Multiplot
+- [x] Change channel interface to select multiple (checkbox)
+- [x] Implement multiple plots
+
+Check
+- [ ] Speed/memory comparison against Speedo
 
 Future state:
-- [x] Workspace or otherwise separate app from library code
-- [ ] Might be able to stop cloning out objects all together if I tidy up the later algorithms to use the maps instead
-- [ ] Smart sub-sampling for speed (based on window size in pixels?)
-- [x] Box zoom (developed by nongiach)
-- [ ] Legend
-- [ ] Axes labels
-- [ ] Time series support
-- [ ] Pretty up the channel interface (tick box to activate channels?)
-- [ ] Remove previous channel on load (or hold multiple files)
-- [ ] Speed comparison against Speedo
-- [x] Tidy up useless accumulating objects variable
 - [ ] Implement TypeVector for FixedPoint
 - [ ] Implement TypeVector for ComplexSingleFloat
 - [ ] Implement TypeVector for ComplexDoubleFloat

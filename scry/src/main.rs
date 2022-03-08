@@ -4,7 +4,7 @@ use flexi_logger::{opt_format, Logger};
 use std::env;
 
 mod app;
-pub use app::TemplateApp;
+pub use app::ScryApp;
 
 fn main() -> () {
     // Initialize a logger for logging debug messages, useful during prototyping
@@ -22,7 +22,7 @@ fn main() -> () {
     println!("{:?}", args);
 
     // Create the gui stuff
-    let app = TemplateApp::default();
+    let app = ScryApp::default();
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(Box::new(app), native_options);
 }

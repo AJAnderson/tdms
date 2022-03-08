@@ -13,7 +13,7 @@ use tdms_datatypes::{
     read_data_vector, read_datatype, read_string, DataType, DataTypeRaw, TocMask, TocProperties,
 };
 pub mod tdms_error;
-pub use tdms_error::{Result, TdmsError, TdmsErrorKind};
+pub use tdms_error::{Result, TdmsError};
 
 const HEADER_LEN: u64 = 28;
 const NO_RAW_DATA: u32 = 0xFFFF_FFFF;
@@ -99,9 +99,11 @@ impl TdmsFile {
     pub fn load_data(&mut self, path: &str) -> Result<DataTypeVec> {
         // check if object exists in map
 
-        let object_map = self.tdms_map.all_objects.get(path).ok_or(TdmsError {
-            kind: TdmsErrorKind::ChannelNotFound,
-        })?;
+        let object_map = self
+            .tdms_map
+            .all_objects
+            .get(path)
+            .ok_or(TdmsError::ChannelNotFound)?;
         if object_map.bigendian {
             Ok(read_data_vector::<_, BE>(object_map, &mut self.reader)?)
         } else {
@@ -133,9 +135,11 @@ impl TdmsFile {
 
     /// Display an objects properties
     pub fn object_properties(&self, path: &str) -> Result<()> {
-        let object = self.tdms_map.all_objects.get(path).ok_or(TdmsError {
-            kind: TdmsErrorKind::ChannelNotFound,
-        })?;
+        let object = self
+            .tdms_map
+            .all_objects
+            .get(path)
+            .ok_or(TdmsError::ChannelNotFound)?;
 
         print!("{}", object.last_object);
 
@@ -144,9 +148,11 @@ impl TdmsFile {
 
     /// Print an object's read pairs
     pub fn object_with_read_pairs(&self, path: &str) -> Result<()> {
-        let object = self.tdms_map.all_objects.get(path).ok_or(TdmsError {
-            kind: TdmsErrorKind::ChannelNotFound,
-        })?;
+        let object = self
+            .tdms_map
+            .all_objects
+            .get(path)
+            .ok_or(TdmsError::ChannelNotFound)?;
 
         print!("{:?}", object);
         Ok(())
@@ -195,8 +201,8 @@ impl TdmsMap {
 
             let segment = match self.read_segment(reader, next_segment_address) {
                 Ok(segment) => segment,
-                Err(err) => match &err.kind {
-                    TdmsErrorKind::Io(e) => match e.kind() {
+                Err(err) => match &err {
+                    TdmsError::Io(e) => match e.kind() {
                         ErrorKind::UnexpectedEof => {
                             println!("Completed read, final segment is corrupted");
                             return Ok(self);
@@ -208,7 +214,6 @@ impl TdmsMap {
                 },
             };
 
-            
             next_segment_address = segment.next_seg_offset + next_segment_address + HEADER_LEN;
 
             self.segments.push(segment);
@@ -573,7 +578,7 @@ impl TdmsObject {
         tdms_map: &mut TdmsMap,
         path: String,
         reader: &mut R,
-    ) -> Result<()> {        
+    ) -> Result<()> {
         // check existence now for later use
         let prior_object = tdms_map.all_objects.contains_key(&path);
 
@@ -599,23 +604,18 @@ impl TdmsObject {
         } else if new_object.index_info_len == DATA_INDEX_MATCHES_PREVIOUS {
             // raw data index for this object should be identical to previous segments.
             if !prior_object {
-                return Err(TdmsError {
-                    kind: TdmsErrorKind::NoPreviousObject,
-                })
+                return Err(TdmsError::NoPreviousObject);
             } else {
                 new_object.update_properties::<R, O>(reader)?;
-
             }
         } else if new_object.index_info_len == FORMAT_CHANGING_SCALER {
             new_object.read_sizeinfo::<R, O>(reader)?;
             new_object.read_daqmxinfo::<R, O>(reader)?;
             new_object.update_properties::<R, O>(reader)?;
-
         } else if new_object.index_info_len == DIGITAL_LINE_SCALER {
             new_object.read_sizeinfo::<R, O>(reader)?;
             new_object.read_daqmxinfo::<R, O>(reader)?;
             new_object.update_properties::<R, O>(reader)?;
-
         } else {
             // This is a fresh, non DAQmx object, or amount of data has changed
             new_object.read_sizeinfo::<R, O>(reader)?;

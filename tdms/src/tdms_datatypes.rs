@@ -1,7 +1,8 @@
+use std::convert::TryFrom;
 use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
 
-use crate::tdms_error::{TdmsError, TdmsErrorKind};
+use crate::tdms_error::{Result, TdmsError};
 use crate::{ObjectMap, ReadPair};
 use byteorder::*;
 use log::debug;
@@ -68,14 +69,12 @@ pub enum DataTypeRaw {
 
 impl DataTypeRaw {
     /// Convert a raw u32 value into a DataTypeRaw enum
-    pub fn from_u32(raw_id: u32) -> Result<DataTypeRaw, TdmsError> {
-        num::FromPrimitive::from_u32(raw_id).ok_or(TdmsError {
-            kind: TdmsErrorKind::RawDataTypeNotFound,
-        })
+    pub fn from_u32(raw_id: u32) -> Result<DataTypeRaw> {
+        num::FromPrimitive::from_u32(raw_id).ok_or(TdmsError::RawDataTypeNotFound)
     }
 
     /// Returns the size of the data type in bytes.    
-    pub fn size(&self) -> Result<u64, TdmsError> {
+    pub fn size(&self) -> Result<u64> {
         match self {
             DataTypeRaw::Void => Ok(0),
             DataTypeRaw::I8 => Ok(1),
@@ -93,9 +92,7 @@ impl DataTypeRaw {
             DataTypeRaw::DoubleFloatWithUnit => Ok(8),
             DataTypeRaw::ExtendedFloatWithUnit => Ok(10),
             DataTypeRaw::Boolean => Ok(1),
-            DataTypeRaw::TdmsString => Err(TdmsError {
-                kind: TdmsErrorKind::StringSizeNotDefined,
-            }),
+            DataTypeRaw::TdmsString => Err(TdmsError::StringSizeNotDefined),
             DataTypeRaw::TimeStamp => Ok(16),
             DataTypeRaw::FixedPoint => Ok(4), // total assumption here
             DataTypeRaw::ComplexSingleFloat => Ok(8), // 2 x floats
@@ -147,7 +144,7 @@ pub enum DataType {
 }
 
 /// Helper function for reading a string from file.
-pub fn read_string<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<String, TdmsError> {
+pub fn read_string<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<String> {
     let str_len = reader.read_u32::<O>()?;
 
     let mut str_raw_buf = vec![0u8; str_len as usize];
@@ -159,7 +156,7 @@ pub fn read_string<R: Read + Seek, O: ByteOrder>(reader: &mut R) -> Result<Strin
 pub fn read_datatype<R: Read + Seek, O: ByteOrder>(
     reader: &mut R,
     rawtype: DataTypeRaw,
-) -> Result<DataType, TdmsError> {
+) -> Result<DataType> {
     let dataout = match rawtype {
         DataTypeRaw::TdmsString => DataType::TdmsString(read_string::<R, O>(reader)?),
         DataTypeRaw::U8 => DataType::U8(reader.read_u8()?),
@@ -213,19 +210,13 @@ pub enum DataTypeVec {
 /// Defines functionality required to read and construct a vector of Tdms
 /// data types
 trait TdmsVector: Sized + Clone + Default {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError>;
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()>;
 
     fn make_vec(v: Vec<Self>) -> DataTypeVec;
 }
 
 impl TdmsVector for bool {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         for item in buffer.iter_mut() {
             *item = !matches!(reader.read_u8()?, 0);
         }
@@ -238,10 +229,7 @@ impl TdmsVector for bool {
 }
 
 impl TdmsVector for i8 {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         reader.read_i8_into(buffer)?;
         Ok(())
     }
@@ -252,10 +240,7 @@ impl TdmsVector for i8 {
 }
 
 impl TdmsVector for i16 {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         reader.read_i16_into::<O>(buffer)?;
         Ok(())
     }
@@ -266,10 +251,7 @@ impl TdmsVector for i16 {
 }
 
 impl TdmsVector for i32 {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         reader.read_i32_into::<O>(buffer)?;
         Ok(())
     }
@@ -280,10 +262,7 @@ impl TdmsVector for i32 {
 }
 
 impl TdmsVector for i64 {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         reader.read_i64_into::<O>(buffer)?;
         Ok(())
     }
@@ -294,10 +273,7 @@ impl TdmsVector for i64 {
 }
 
 impl TdmsVector for u8 {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         reader.read_exact(buffer)?;
         Ok(())
     }
@@ -308,10 +284,7 @@ impl TdmsVector for u8 {
 }
 
 impl TdmsVector for u16 {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         reader.read_u16_into::<O>(buffer)?;
         Ok(())
     }
@@ -322,10 +295,7 @@ impl TdmsVector for u16 {
 }
 
 impl TdmsVector for u32 {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         reader.read_u32_into::<O>(buffer)?;
         Ok(())
     }
@@ -336,10 +306,7 @@ impl TdmsVector for u32 {
 }
 
 impl TdmsVector for u64 {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         reader.read_u64_into::<O>(buffer)?;
         Ok(())
     }
@@ -350,10 +317,7 @@ impl TdmsVector for u64 {
 }
 
 impl TdmsVector for f32 {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         reader.read_f32_into::<O>(buffer)?;
         Ok(())
     }
@@ -364,10 +328,7 @@ impl TdmsVector for f32 {
 }
 
 impl TdmsVector for f64 {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         reader.read_f64_into::<O>(buffer)?;
         Ok(())
     }
@@ -378,10 +339,7 @@ impl TdmsVector for f64 {
 }
 
 impl TdmsVector for String {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         let mut string_lengths: Vec<u32> = Vec::new();
         for _ in 0..buffer.len() {
             string_lengths.push(reader.read_u32::<O>()?);
@@ -405,10 +363,7 @@ impl TdmsVector for String {
 }
 
 impl TdmsVector for TimeStamp {
-    fn read<R: Read + Seek, O: ByteOrder>(
-        buffer: &mut [Self],
-        reader: &mut R,
-    ) -> Result<(), TdmsError> {
+    fn read<R: Read + Seek, O: ByteOrder>(buffer: &mut [Self], reader: &mut R) -> Result<()> {
         for item in buffer.iter_mut() {
             let epoch = reader.read_i64::<O>()?;
             let radix = reader.read_u64::<O>()?;
@@ -428,7 +383,7 @@ fn read_into_vec<T: TdmsVector, R: Read + Seek, O: ByteOrder>(
     reader: &mut R,
     read_pairs: &[ReadPair],
     total_values: usize,
-) -> Result<DataTypeVec, TdmsError> {
+) -> Result<DataTypeVec> {
     let mut datavec: Vec<T> = vec![T::default(); total_values];
     let mut i: usize = 0; // dummy variable to track values for indexing
 
@@ -454,11 +409,12 @@ fn read_into_vec<T: TdmsVector, R: Read + Seek, O: ByteOrder>(
 pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(
     object_map: &ObjectMap,
     reader: &mut R,
-) -> Result<DataTypeVec, TdmsError> {
+) -> Result<DataTypeVec> {
     let read_pairs = &object_map.read_map;
-    let rawtype = &object_map.last_object.raw_data_type.ok_or(TdmsError {
-        kind: TdmsErrorKind::ObjectHasNoRawData,
-    })?;
+    let rawtype = &object_map
+        .last_object
+        .raw_data_type
+        .ok_or(TdmsError::ObjectHasNoRawData)?;
     let total_values = object_map.total_values;
     debug!("Map total values: {}", total_values);
 
@@ -490,4 +446,93 @@ pub fn read_data_vector<R: Read + Seek, O: ByteOrder>(
         _ => unimplemented!(),
     };
     Ok(datavec)
+}
+
+impl TryFrom<DataTypeVec> for Vec<f64> {
+    type Error = TdmsError;
+
+    fn try_from(in_vec: DataTypeVec) -> Result<Self> {
+        match in_vec {
+            //Void(datavec) => ,
+            DataTypeVec::Boolean(datavec) => {
+                let out_vec: Vec<f64> =
+                    datavec.iter().map(|x| if *x { 1.0 } else { 0.0 }).collect();
+                Ok(out_vec)
+            }
+            DataTypeVec::I8(datavec) => {
+                let mut out_vec: Vec<f64> = vec![0.0; datavec.len()];
+                for (i, elem) in out_vec.iter_mut().enumerate() {
+                    *elem = datavec[i] as f64;
+                }
+                Ok(out_vec)
+            }
+            DataTypeVec::I16(datavec) => {
+                let mut out_vec: Vec<f64> = vec![0.0; datavec.len()];
+                for (i, elem) in out_vec.iter_mut().enumerate() {
+                    *elem = datavec[i] as f64;
+                }
+                Ok(out_vec)
+            }
+            DataTypeVec::I32(datavec) => {
+                let mut out_vec: Vec<f64> = vec![0.0; datavec.len()];
+                for (i, elem) in out_vec.iter_mut().enumerate() {
+                    *elem = datavec[i] as f64;
+                }
+                Ok(out_vec)
+            }
+            DataTypeVec::I64(datavec) => {
+                let mut out_vec: Vec<f64> = vec![0.0; datavec.len()];
+                for (i, elem) in out_vec.iter_mut().enumerate() {
+                    *elem = datavec[i] as f64;
+                }
+                Ok(out_vec)
+            }
+            DataTypeVec::U8(datavec) => {
+                let mut out_vec: Vec<f64> = vec![0.0; datavec.len()];
+                for (i, elem) in out_vec.iter_mut().enumerate() {
+                    *elem = datavec[i] as f64;
+                }
+                Ok(out_vec)
+            }
+            DataTypeVec::U16(datavec) => {
+                let mut out_vec: Vec<f64> = vec![0.0; datavec.len()];
+                for (i, elem) in out_vec.iter_mut().enumerate() {
+                    *elem = datavec[i] as f64;
+                }
+                Ok(out_vec)
+            }
+            DataTypeVec::U32(datavec) => {
+                let mut out_vec: Vec<f64> = vec![0.0; datavec.len()];
+                for (i, elem) in out_vec.iter_mut().enumerate() {
+                    *elem = datavec[i] as f64;
+                }
+                Ok(out_vec)
+            }
+            DataTypeVec::U64(datavec) => {
+                let mut out_vec: Vec<f64> = vec![0.0; datavec.len()];
+                for (i, elem) in out_vec.iter_mut().enumerate() {
+                    *elem = datavec[i] as f64;
+                }
+                Ok(out_vec)
+            }
+            DataTypeVec::Float(datavec) => {
+                let mut out_vec: Vec<f64> = vec![0.0; datavec.len()];
+                for (i, elem) in out_vec.iter_mut().enumerate() {
+                    *elem = datavec[i] as f64;
+                }
+                Ok(out_vec)
+            }
+            DataTypeVec::Double(datavec) => Ok(datavec),
+            // Extended(Vec<f128>),     // Can't represent this currently
+            // FloatUnit(Vec<f32>),     // Don't exist as distinct types in files
+            // DoubleUnit(Vec<f64>),    // Don't exist as distinct types in files
+            // ExtendedUnit(Vec<FloatWithUnit<f128>>), Can't represent this
+            // TdmsString(Vec<String>),
+            // DaqMx(Vec<??>),          // Don't exist as distinct types in files
+            // ComplexSingle(Vec<??>)
+            // CompledDouble(Vec<??>)
+            // TimeStamp(Vec<TimeStamp>),
+            _ => unimplemented!(),
+        }
+    }
 }

@@ -1,6 +1,6 @@
 [package]
 authors = ["Alex Anderson <anderson.alexj@gmail.com>"]
-edition = "2018"
+edition = "2021"
 name = "tdms"
 version = "0.3.0"
 
