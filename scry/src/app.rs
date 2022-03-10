@@ -14,31 +14,6 @@ pub struct ChannelState {
     selected: bool,
 }
 
-// pub struct BoolHist {
-//     current: bool,
-//     previous: bool,
-// }
-
-// impl BoolHist {
-//     pub fn toggle(&mut self) -> () {
-//         if self.current {
-//             self.current = false;
-//             self.previous = true;
-//         } else {
-//             self.current = true;
-//             self.previous = false;
-//         }
-//     }
-
-//     pub fn was_on(&self) -> bool {
-//         self.previous
-//     }
-
-//     pub fn is_on(&self) -> bool {
-//         self.current
-//     }
-// }
-
 pub struct ScryApp {
     // Example stuff:
     file_handle: Option<TdmsFile>,
@@ -160,6 +135,21 @@ impl epi::App for ScryApp {
                     })
                     .inner;
             });
+        
+        egui::SidePanel::right("side_panel")
+            .min_width(200.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                ui.heading("Channel Properties");
+                for channel in self.channel_state.iter() {
+                    if channel.selected {
+                        if let Some(file_map) = &self.file_handle {
+                            let properties = file_map.object_properties(&channel.name).expect("TODO (Error handling): No props");
+                        }
+                    }
+                }
+
+            });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             // Main Plot Pannel
@@ -169,9 +159,9 @@ impl epi::App for ScryApp {
             if let Some(lines) = self.cached_data_to_line() {
                 Plot::new("Channel Data")                    
                     .legend(Legend::default())
-                    .x_axis_formatter(|value, range| {                             
-                            format!("hello: {}", value).to_string()                             
-                         })
+                    // .x_axis_formatter(|value, range| {                             
+                    //         format!("hello: {}", value).to_string()                             
+                    //      })
                     .show(ui, |plot_ui| {
                         for line in lines {
                             plot_ui.line(line)

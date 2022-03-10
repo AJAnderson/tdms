@@ -767,3 +767,14 @@ Got it! needed to iterate inside the closure.
 + Enabled multi-plot including addition and removal of plots
 
 started tinkering with label formatting to display say date time instead of just samples.
+
+10/3/2022
+
+Little bit distracted but started working on a panel to show properties to help with debugging which has prompted me to
+think a little more about the public API.
+
+People will want to be able to introspect objects. I think I need to rearrange which functions are where and who has responsibilty
+for creating objects
+
++ Deleted TdmsMetadata struct and moved its main useful fields chunk_size and channels_size into TdmsSegment struct
++ Moved the read Tdmsmetadata + chunk computation algorithm into the main read_segment_metadata function, massively collapsed lines and redundant ops

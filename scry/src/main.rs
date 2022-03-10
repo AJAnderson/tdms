@@ -23,6 +23,8 @@ fn main() -> () {
 
     // Create the gui stuff
     let app = ScryApp::default();
-    let native_options = eframe::NativeOptions::default();
+    let mut native_options = eframe::NativeOptions::default();
+    native_options.maximized = true;
+    
     eframe::run_native(Box::new(app), native_options);
 }
