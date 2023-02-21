@@ -25,6 +25,6 @@ fn main() -> () {
     let app = ScryApp::default();
     let mut native_options = eframe::NativeOptions::default();
     native_options.maximized = true;
-    
+
     eframe::run_native(Box::new(app), native_options);
 }

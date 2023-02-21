@@ -1,23 +1,31 @@
 use std::convert::TryFrom;
-use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
 
 use crate::tdms_error::{Result, TdmsError};
+use crate::timestamps::TimeStamp;
 use crate::{ObjectMap, ReadPair};
 use byteorder::*;
 use log::debug;
 use num_derive::FromPrimitive;
 use num_enum::IntoPrimitive;
 
+/// An enum of bit flags indicating various data configuration options at the
+/// segment level.
 #[derive(IntoPrimitive, Debug)]
 #[repr(u32)]
 pub enum TocProperties {
-    KTocMetaData = 1 << 1,        // segment contains meta data
-    KTocRawData = 1 << 3,         // segment contains raw data
-    KTocDAQmxRawData = 1 << 7,    // segment contains DAQmx raw data
-    KTocInterleavedData = 1 << 5, // raw data is interleaved (else continuous)
-    KTocBigEndian = 1 << 6,       // all numeric values in segment are bigendian (including lead in)
-    KTocNewObjList = 1 << 2, // first segment, or order has changed (is not present when channel is added)
+    /// segment contains meta data
+    KTocMetaData = 1 << 1,
+    /// segment contains raw data
+    KTocRawData = 1 << 3,
+    /// segment contains DAQmx raw data    
+    KTocDAQmxRawData = 1 << 7,
+    /// raw data is interleaved (else continuous)
+    KTocInterleavedData = 1 << 5,
+    /// all numeric values in segment are bigendian (including lead in)
+    KTocBigEndian = 1 << 6,
+    /// first segment, or order has changed (is not present when channel is added)
+    KTocNewObjList = 1 << 2,
 }
 
 #[derive(Debug)]
@@ -102,20 +110,6 @@ impl DataTypeRaw {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct TimeStamp {
-    pub epoch: i64,
-    pub radix: u64,
-}
-
-impl fmt::Display for TimeStamp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "{}\t{}", self.epoch, self.radix)?;
-
-        Ok(())
-    }
-}
-
 /// A wrapper type for data types found in tdms files
 /// QUESTION: Is there a better way to allow for generic returns in "read_data" functions
 #[derive(Debug, Clone)]
@@ -137,7 +131,7 @@ pub enum DataType {
     // DoubleUnit(f64), // as above
     //ExtendedUnit(FloatWithUnit<f128>), // Can't represent this currently
     TdmsString(String),
-    // DaqMx(??), // I think these don't exist, it's a normal double with properties
+    DaqMx(f64), // I think these don't exist, it's a normal double with properties
     // ComplexSingle(??)
     // CompledDouble(??)
     TimeStamp(TimeStamp),
@@ -175,6 +169,7 @@ pub fn read_datatype<R: Read + Seek, O: ByteOrder>(
             let radix = reader.read_u64::<O>()?;
             DataType::TimeStamp(TimeStamp { epoch, radix })
         }
+        DataTypeRaw::DAQmxRawData => DataType::DaqMx(reader.read_f64::<O>()?),
         _ => unimplemented!(),
     };
 

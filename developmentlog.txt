@@ -778,3 +778,16 @@ for creating objects
 
 + Deleted TdmsMetadata struct and moved its main useful fields chunk_size and channels_size into TdmsSegment struct
 + Moved the read Tdmsmetadata + chunk computation algorithm into the main read_segment_metadata function, massively collapsed lines and redundant ops
+
+11/3/2022
+
++ Moved update_read_object to be a method of TdmsMap, the read functions for object data like daqmx data remain as private functions on objects.
++ renamed Objectpropery "property" field to "value" to make it more precise
++ Moved object stuff out into tdms_objects.rs
++ deleted the object_with_readpairs function from the public API
+
+Discovered daqmx is not implemented for datatype read
+
+13/3/2021
+
++ Added conversion to Chrono DateTime<Local> variant

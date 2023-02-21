@@ -1,7 +1,7 @@
 use eframe::egui::ScrollArea;
 use eframe::{egui, epi};
 // use eframe::egui::Ui;
-use egui::plot::{Legend, Line, Plot, Value, Values, Text};
+use egui::plot::{Legend, Line, Plot, Text, Value, Values};
 use egui::Align2;
 use log::debug;
 use rfd::FileDialog;
@@ -97,7 +97,7 @@ impl epi::App for ScryApp {
                 if ui.button("Load File").clicked() {
                     self.open_dialog()
                 }
-                let scroll_area = ScrollArea::new([false, true]);
+                let scroll_area = ScrollArea::new([false, true]).id_source("area1");
 
                 let (_current_scroll, _max_scroll) = scroll_area
                     .show(ui, |ui| {
@@ -135,7 +135,7 @@ impl epi::App for ScryApp {
                     })
                     .inner;
             });
-        
+
         egui::SidePanel::right("side_panel")
             .min_width(200.0)
             .resizable(true)
@@ -144,29 +144,33 @@ impl epi::App for ScryApp {
                 for channel in self.channel_state.iter() {
                     if channel.selected {
                         if let Some(file_map) = &self.file_handle {
-                            let properties = file_map.object_properties(&channel.name).expect("TODO (Error handling): No props");
+                            let properties = file_map
+                                .object_properties(&channel.name)
+                                .expect("TODO (Error handling): No props");
+                            ui.label(properties.to_string());
                         }
                     }
                 }
-
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             // Main Plot Pannel
-            ui.heading("Main plot");
+            ui.heading("Numeric Data");
 
             // If we have a chan_path then load it if we haven't already
             if let Some(lines) = self.cached_data_to_line() {
-                Plot::new("Channel Data")                    
+                Plot::new("Channel Data")
                     .legend(Legend::default())
-                    // .x_axis_formatter(|value, range| {                             
-                    //         format!("hello: {}", value).to_string()                             
+                    // .x_axis_formatter(|value, range| {
+                    //         format!("hello: {}", value).to_string()
                     //      })
                     .show(ui, |plot_ui| {
                         for line in lines {
                             plot_ui.line(line)
                         }
-                        plot_ui.text(Text::new(Value::new(0.0, 0.0), "Time").anchor(Align2::CENTER_TOP))
+                        plot_ui.text(
+                            Text::new(Value::new(0.0, 0.0), "Time").anchor(Align2::CENTER_TOP),
+                        )
                     });
             }
 

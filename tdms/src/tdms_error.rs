@@ -6,13 +6,18 @@ use std::string;
 /// data in the file
 #[derive(Debug)]
 pub enum TdmsError {
+    // Io and parse errors
     Io(io::Error),
     FromUtf8(string::FromUtf8Error),
+    // Library errors
     NoPreviousObject,
     StringSizeNotDefined,
     RawDataTypeNotFound,
     ChannelNotFound,
     ObjectHasNoRawData,
+    // Chronoerror
+    MalformedTimestamp { seconds: i64, nano: u32 },
+    AmbiguousTimestamp { seconds: i64, nano: u32 },
 }
 
 pub type Result<T> = std::result::Result<T, TdmsError>;
@@ -39,8 +44,8 @@ impl fmt::Display for TdmsError {
             TdmsError::NoPreviousObject => {
                 write!(f, "Raw data index was equal to zero indicating this object has appeared before, 
                 but no previous object was recorded. Data may be malformed")?
-            }, 
-            TdmsError::StringSizeNotDefined => { 
+            },
+            TdmsError::StringSizeNotDefined => {
                 write!(f, "Calling size directly on a DataTypeRaw::TdmsString is not meaningful.")?
             },
             TdmsError::RawDataTypeNotFound => {
@@ -51,6 +56,12 @@ impl fmt::Display for TdmsError {
             },
             TdmsError::ObjectHasNoRawData => {
                 write!(f, "The requested object does not contain any raw data")?
+            },
+            TdmsError::MalformedTimestamp {seconds, nano } => {
+                write!(f, "The Chrono parser could not create a Datetime object from the provided seconds/nanoseconds information: {} / {}", seconds, nano)?
+            },
+            TdmsError::AmbiguousTimestamp {seconds, nano } => {
+                write!(f, "The Chrono parser could not create a unique Datetime object from the provided seconds/nanoseconds information: {} / {}", seconds, nano)?
             },
         }
         Ok(())

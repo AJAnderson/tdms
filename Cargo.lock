@@ -2016,6 +2016,7 @@ name = "tdms"
 version = "0.3.0"
 dependencies = [
  "byteorder",
+ "chrono",
  "flexi_logger",
  "indexmap",
  "log",
